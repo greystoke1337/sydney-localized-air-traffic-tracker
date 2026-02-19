@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>SYD Arrivals</title>
+  <title>Overhead Tracker</title>
   <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -36,6 +36,15 @@
     }
     body.dotmatrix button:hover { background: #ff660022; }
     body.dotmatrix .theme-btn { border-color: #ff4400; color: #ff4400; float: right; }
+    #location-ctrl { display: flex; gap: 6px; align-items: center; margin: 10px 0 4px; }
+    #suburb-input {
+      background: none; border: 1px solid #ff6600; color: #ff6600;
+      font-family: 'Share Tech Mono', monospace; font-size: 0.85rem;
+      padding: 4px 8px; flex: 1; outline: none;
+      text-shadow: 0 0 6px #ff4400;
+    }
+    #suburb-input::placeholder { color: #7a3300; text-shadow: none; }
+    #geofence-status { font-size: 0.75rem; opacity: 0.6; margin: 0 0 8px; }
     #dm-canvas { display: block; margin-top: 16px; image-rendering: pixelated; }
 
     /* Photo */
@@ -60,9 +69,13 @@
 
   <!-- ══ DOTMATRIX LAYOUT ══ -->
   <div class="classic-layout">
-    <p>SYD // SYDNEY KINGSFORD SMITH<br>ARRIVALS BOARD <span class="blink">█</span>
-</p>
+    <p>OVERHEAD // <span id="suburb-display">RUSSELL LEA</span><br>LIVE AIRCRAFT TRACKER <span class="blink">█</span></p>
     <hr>
+    <div id="location-ctrl">
+      <input id="suburb-input" value="Russell Lea" placeholder="Enter suburb...">
+      <button onclick="setLocation()">SET LOCATION</button>
+    </div>
+    <p id="geofence-status">GEOFENCE RADIUS: 5KM</p>
     <p id="error"></p>
     <p id="info">LOADING...</p>
     <p id="main"></p>
@@ -80,6 +93,9 @@
   </div>
   <script>
     const SYD_LAT = -33.9461, SYD_LON = 151.1772;
+    const GEOFENCE_KM = 5;
+    let suburbName = 'RUSSELL LEA';
+    let suburbLat = -33.8598, suburbLon = 151.1369; // Russell Lea, NSW
     let flights = [], i = 0;
 
     function haversineKm(lat1, lon1, lat2, lon2) {
@@ -255,17 +271,44 @@
     }
 
     // ── Map
-    let map, acMarker, acLine;
+    let map, acMarker, acLine, geofenceCircle, suburbMarker;
     function initMap() {
       map = L.map('dm-map', { zoomControl: false })
-        .setView([SYD_LAT, SYD_LON], 9);
+        .setView([suburbLat, suburbLon], 11);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '© OpenStreetMap © Carto', maxZoom: 14
       }).addTo(map);
+      // SYD airport — dimmer since it's now a reference point, not the focus
       L.circleMarker([SYD_LAT, SYD_LON], {
-        radius: 6, color: '#ff6600', fillColor: '#ff4400', fillOpacity: 1, weight: 2
+        radius: 4, color: '#7a3300', fillColor: '#7a3300', fillOpacity: 1, weight: 2
       }).addTo(map)
         .bindTooltip('SYD', { permanent: true, direction: 'right', className: 'dm-callout' });
+      updateGeofenceCircle();
+    }
+    function updateGeofenceCircle() {
+      if (geofenceCircle) {
+        geofenceCircle.setLatLng([suburbLat, suburbLon]);
+      } else {
+        geofenceCircle = L.circle([suburbLat, suburbLon], {
+          radius: GEOFENCE_KM * 1000,
+          color: '#ff6600', fillColor: '#ff6600', fillOpacity: 0.05,
+          weight: 1, dashArray: '5 5'
+        }).addTo(map);
+      }
+      if (suburbMarker) {
+        suburbMarker.setLatLng([suburbLat, suburbLon]);
+        suburbMarker.getTooltip().setContent(suburbName);
+      } else {
+        suburbMarker = L.circleMarker([suburbLat, suburbLon], {
+          radius: 5, color: '#ffffff', fillColor: '#ffffff', fillOpacity: 0.9, weight: 2
+        }).addTo(map)
+          .bindTooltip(suburbName, { permanent: true, direction: 'right', className: 'dm-callout' });
+      }
+      map.setView([suburbLat, suburbLon], 11);
+    }
+    function clearAircraftMarker() {
+      if (acMarker) { acMarker.remove(); acMarker = null; }
+      if (acLine) { acLine.remove(); acLine = null; }
     }
     function updateMap(lat, lon, callsign) {
       const pos = [lat, lon];
@@ -278,16 +321,17 @@
         }).addTo(map)
           .bindTooltip(callsign, { permanent: true, direction: 'top', className: 'dm-callout' });
       }
-      if (acLine) acLine.setLatLngs([pos, [SYD_LAT, SYD_LON]]);
-      else acLine = L.polyline([pos, [SYD_LAT, SYD_LON]], {
+      if (acLine) acLine.setLatLngs([pos, [suburbLat, suburbLon]]);
+      else acLine = L.polyline([pos, [suburbLat, suburbLon]], {
         color: '#ff6600', weight: 1, opacity: 0.4, dashArray: '4 6'
       }).addTo(map);
-      map.fitBounds(L.latLngBounds(pos, [SYD_LAT, SYD_LON]).pad(0.3));
+      map.fitBounds(L.latLngBounds([pos, [suburbLat, suburbLon], [SYD_LAT, SYD_LON]]).pad(0.3));
     }
 
     function render(f) {
       const ctr = '[' + (i+1) + '/' + flights.length + ']';
-      const dist = haversineKm(SYD_LAT, SYD_LON, f.lat, f.lon);
+      const distLoc = haversineKm(suburbLat, suburbLon, f.lat, f.lon);
+      const distSyd = haversineKm(SYD_LAT, SYD_LON, f.lat, f.lon);
       const altFt = typeof f.alt_baro === 'number' ? f.alt_baro : 0;
       const altStr = typeof f.alt_baro === 'number' ? f.alt_baro.toLocaleString() + ' FT' : '---';
       const spd = f.gs ? Math.round(f.gs) + ' KT' : '---';
@@ -300,7 +344,6 @@
 
       const airline = airlineFromCallsign(call);
 
-      // Dot matrix text
       document.getElementById('info').innerHTML =
         'FLIGHT&nbsp;&nbsp; ' + call + '<br>' +
         'REG&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ' + reg + '<br>' +
@@ -311,19 +354,14 @@
         'SPEED&nbsp;&nbsp;&nbsp; ' + spd + '<br>' +
         'V/SPEED&nbsp; ' + vs + '<br>' +
         'HEADING&nbsp; ' + hdg + '<br>' +
-        'DIST SYD&nbsp; ' + dist.toFixed(1) + ' KM<br>' +
+        'DIST LOC&nbsp; ' + distLoc.toFixed(1) + ' KM<br>' +
+        'DIST SYD&nbsp; ' + distSyd.toFixed(1) + ' KM<br>' +
         'SQUAWK&nbsp;&nbsp; ' + sqk;
       document.getElementById('counter').textContent = ctr;
 
-      // Fetch photo (async, non-blocking)
       fetchPhoto(reg, f.hex || '', type);
-
-      // Dot matrix canvas
-      drawProfile('dm-canvas', dist, altFt, '#ff6600', '#1a0a00', '#7a3300');
-
-      // Map
+      drawProfile('dm-canvas', distSyd, altFt, '#ff6600', '#1a0a00', '#7a3300');
       updateMap(f.lat, f.lon, call);
-
     }
 
     // ── Fetch aircraft photo from Planespotters
@@ -373,32 +411,65 @@
       if (secs <= 0) { secs = 30; fetchFlights(); }
     }, 1000);
 
+    // ── Geocode suburb name → lat/lon via Nominatim (OSM)
+    async function geocodeSuburb(name) {
+      const q = encodeURIComponent(name + ', New South Wales, Australia');
+      const url = 'https://nominatim.openstreetmap.org/search?q=' + q + '&format=json&limit=1';
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'Accept-Language': 'en' }
+      });
+      if (!res.ok) throw new Error('Geocoding request failed');
+      const data = await res.json();
+      if (!data.length) throw new Error('Suburb not found: ' + name);
+      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+    }
+
+    async function setLocation() {
+      const input = document.getElementById('suburb-input').value.trim();
+      if (!input) return;
+      document.getElementById('error').textContent = 'LOCATING ' + input.toUpperCase() + '...';
+      try {
+        const { lat, lon } = await geocodeSuburb(input);
+        suburbName = input.toUpperCase();
+        suburbLat = lat;
+        suburbLon = lon;
+        document.getElementById('suburb-display').textContent = suburbName;
+        document.getElementById('error').textContent = '';
+        clearAircraftMarker();
+        updateGeofenceCircle();
+        secs = 30;
+        await fetchFlights();
+      } catch(e) {
+        document.getElementById('error').textContent = 'LOCATION ERR: ' + e.message;
+      }
+    }
+
     async function fetchFlights() {
       document.getElementById('info').textContent = 'FETCHING DATA...';
-document.getElementById('error').textContent = '';
+      document.getElementById('error').textContent = '';
       try {
-        const url = 'https://api.airplanes.live/v2/point/' + SYD_LAT + '/' + SYD_LON + '/50';
+        // Query a 10nm (~18.5km) radius around the suburb — larger than our 5km geofence
+        // so aircraft clipping the edge of the circle are captured, then we filter precisely
+        const url = 'https://api.airplanes.live/v2/point/' + suburbLat + '/' + suburbLon + '/10';
         const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        let ac = data.ac || [];
-        // Exclude traffic near Bankstown (BWU) — within 8km is likely a Bankstown arrival
-        const BANK_LAT = -33.9244, BANK_LON = 150.9883;
-        function nearBankstown(f) { return haversineKm(BANK_LAT, BANK_LON, f.lat, f.lon) < 8; }
-        // Also exclude aircraft heading to/from west (Bankstown approaches from west)
-        // Primary filter: descending, not near Bankstown, within 50nm of SYD
-        ac = ac.filter(f =>
+        let ac = (data.ac || []).filter(f =>
           typeof f.alt_baro === 'number' && f.lat && f.lon &&
-          f.baro_rate < 0 &&
-          !nearBankstown(f)
+          haversineKm(suburbLat, suburbLon, f.lat, f.lon) <= GEOFENCE_KM
         );
-        ac.sort((a, b) => haversineKm(SYD_LAT, SYD_LON, a.lat, a.lon) - haversineKm(SYD_LAT, SYD_LON, b.lat, b.lon));
-        if (ac.length === 0) {
-          ac = (data.ac || []).filter(f =>
-            typeof f.alt_baro === 'number' && f.lat && f.lon && !nearBankstown(f)
-          );
-          ac.sort((a, b) => haversineKm(SYD_LAT, SYD_LON, a.lat, a.lon) - haversineKm(SYD_LAT, SYD_LON, b.lat, b.lon));
-          if (!ac.length) { document.getElementById('info').textContent = 'NO TRAFFIC DETECTED.'; return; }
+        ac.sort((a, b) =>
+          haversineKm(suburbLat, suburbLon, a.lat, a.lon) -
+          haversineKm(suburbLat, suburbLon, b.lat, b.lon)
+        );
+        if (!ac.length) {
+          clearAircraftMarker();
+          clearPhoto();
+          document.getElementById('info').textContent = 'NO AIRCRAFT ABOVE ' + suburbName + '.';
+          document.getElementById('main').textContent = '';
+          document.getElementById('counter').textContent = '';
+          return;
         }
         flights = ac;
         i = 0;
@@ -411,8 +482,12 @@ document.getElementById('error').textContent = '';
     }
 
     document.addEventListener('keydown', e => {
+      if (document.activeElement === document.getElementById('suburb-input')) return;
       if (e.key === 'ArrowRight') next();
       if (e.key === 'ArrowLeft') prev();
+    });
+    document.getElementById('suburb-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') setLocation();
     });
 
     initMap();
