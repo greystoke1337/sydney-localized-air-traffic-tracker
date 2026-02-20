@@ -45,13 +45,10 @@
     }
     #suburb-input::placeholder { color: #7a3300; text-shadow: none; }
     #geofence-status { font-size: 0.75rem; opacity: 0.6; margin: 0 0 8px; }
-    /* max-width: 100% prevents overflow on narrow screens; JS also resizes the pixel buffer */
-    #dm-canvas { display: block; margin-top: 16px; image-rendering: pixelated; max-width: 100%; }
-
     /* Photo */
-    .photo-wrap { position:relative; display:block; margin-top:10px; }
+    .photo-wrap { position:relative; display:block; margin-top:10px; z-index: 0; }
     .photo-wrap::after {
-      content:''; position:absolute; inset:0; pointer-events:none;
+      content:''; position:absolute; inset:0; pointer-events:none; z-index: 1;
       background-image: radial-gradient(circle, rgba(26,10,0,0.65) 1px, transparent 1px);
       background-size: 3px 3px;
     }
@@ -86,7 +83,6 @@
     <p id="error"></p>
     <p id="info">LOADING...</p>
     <p id="main"></p>
-    <canvas id="dm-canvas"></canvas>
     <div id="dm-map"></div>
     <div class="photo-wrap" id="photo-wrap" style="display:none"><img id="dm-photo" alt="Aircraft photo"></div>
     <p id="dm-photo-credit"></p>
@@ -130,160 +126,6 @@
       const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
       const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    }
-
-    // ── Resize canvas pixel buffer to fit its container, preserving 460×120 aspect ratio.
-    // CSS max-width:100% prevents overflow; this keeps rendering crisp on narrow screens.
-    function resizeCanvas() {
-      const canvas = document.getElementById('dm-canvas');
-      const w = Math.min(460, canvas.parentElement.clientWidth || 460);
-      const h = Math.round(w * 120 / 460);
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-        if (flights.length) render(flights[flightIndex]);
-      }
-    }
-    window.addEventListener('resize', resizeCanvas);
-
-    // ── Draw descent profile on a canvas.
-    // distKm and altFt are relative to SYD — used as the glideslope reference point,
-    // not the suburb. This shows the aircraft's progress on the ILS approach to SYD.
-    function drawProfile(canvasId, distKm, altFt, color, bgcolor, dimColor) {
-      const canvas = document.getElementById(canvasId);
-      if (!canvas) return;
-      const W = canvas.width, H = canvas.height;
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, W, H);
-
-      // Background
-      ctx.fillStyle = bgcolor;
-      ctx.fillRect(0, 0, W, H);
-
-      const PAD_L = 44, PAD_R = 10, PAD_T = 8, PAD_B = 22;
-      const gW = W - PAD_L - PAD_R;
-      const gH = H - PAD_T - PAD_B;
-
-      const GLIDE_DEG = 3;
-      const tanG = Math.tan(GLIDE_DEG * Math.PI / 180);
-
-      // Normalize: always center the view around the aircraft
-      // Show aircraft at ~60% from right, with 15nm window
-      const WINDOW_NM = 15;
-      const distNm = distKm / 1.852;
-
-      // X range: aircraft sits at 60% from left, so show [dist-9nm .. dist+6nm] roughly
-      const xMinNm = Math.max(0, distNm - WINDOW_NM * 0.6);
-      const xMaxNm = xMinNm + WINDOW_NM;
-      const xMinKm = xMinNm * 1.852, xMaxKm = xMaxNm * 1.852;
-
-      // Y range: glideslope alt at xMax + 20% headroom, always show 0
-      const gsAtMax = xMaxKm * tanG * 3281;
-      const acAlt = Math.max(altFt, 50);
-      const yMaxAlt = Math.max(gsAtMax, acAlt) * 1.25;
-      const MAX_ALT = Math.ceil(yMaxAlt / 1000) * 1000 || 5000;
-
-      function xp(km) { return PAD_L + (1 - (km - xMinKm) / (xMaxKm - xMinKm)) * gW; }
-      function yp(ft)  { return PAD_T + (1 - ft / MAX_ALT) * gH; }
-
-      // Grid lines
-      ctx.strokeStyle = dimColor;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 4]);
-      // Alt gridlines: ~4 lines
-      const altStep = Math.ceil(MAX_ALT / 4 / 500) * 500;
-      for (let a = altStep; a < MAX_ALT; a += altStep) {
-        ctx.beginPath(); ctx.moveTo(PAD_L, yp(a)); ctx.lineTo(W - PAD_R, yp(a)); ctx.stroke();
-      }
-      // Dist gridlines: round nm markers inside window
-      const nmStep = WINDOW_NM <= 10 ? 2 : 5;
-      for (let n = Math.ceil(xMinNm / nmStep) * nmStep; n <= xMaxNm; n += nmStep) {
-        const km = n * 1.852;
-        ctx.beginPath(); ctx.moveTo(xp(km), PAD_T); ctx.lineTo(xp(km), H - PAD_B); ctx.stroke();
-      }
-      ctx.setLineDash([]);
-
-      // Axes
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(PAD_L, PAD_T); ctx.lineTo(PAD_L, H - PAD_B);
-      ctx.moveTo(PAD_L, H - PAD_B); ctx.lineTo(W - PAD_R, H - PAD_B);
-      ctx.stroke();
-
-      // Axis labels — alt
-      ctx.fillStyle = color;
-      ctx.font = '9px Share Tech Mono, monospace';
-      ctx.textAlign = 'right';
-      for (let a = 0; a <= MAX_ALT; a += altStep) {
-        ctx.fillText(a === 0 ? '0' : (a/1000).toFixed(1)+'K', PAD_L - 2, yp(a) + 3);
-      }
-      // Axis labels — nm
-      ctx.textAlign = 'center';
-      for (let n = Math.ceil(xMinNm / nmStep) * nmStep; n <= xMaxNm; n += nmStep) {
-        ctx.fillText(n + 'nm', xp(n * 1.852), H - PAD_B + 12);
-      }
-      // SYD marker if airport is in view
-      if (0 >= xMinKm && 0 <= xMaxKm) {
-        ctx.textAlign = 'center';
-        ctx.fillText('SYD', xp(0), H - PAD_B + 12);
-        ctx.strokeStyle = color; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(xp(0), PAD_T); ctx.lineTo(xp(0), H - PAD_B); ctx.stroke();
-      }
-
-      // 3° glideslope line across full X range
-      ctx.strokeStyle = dimColor;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(xp(xMinKm), yp(xMinKm * tanG * 3281));
-      ctx.lineTo(xp(xMaxKm), yp(xMaxKm * tanG * 3281));
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Glideslope label
-      ctx.fillStyle = dimColor;
-      ctx.textAlign = 'left';
-      ctx.font = '9px Share Tech Mono, monospace';
-      ctx.fillText('3° GS', PAD_L + 4, yp(xMinKm * tanG * 3281) - 3);
-
-      // Aircraft position dot
-      const ac_x = xp(distKm);
-      const ac_y = yp(altFt);
-
-      // Vertical line from dot to glideslope (deviation indicator)
-      const gsAltAtDist = distKm * tanG * 3281;
-      const gs_y = yp(gsAltAtDist);
-      const above = altFt > gsAltAtDist;
-      ctx.strokeStyle = above ? '#e8e820' : color;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 2]);
-      ctx.beginPath();
-      ctx.moveTo(ac_x, Math.min(ac_y, gs_y));
-      ctx.lineTo(ac_x, Math.max(ac_y, gs_y));
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Dot
-      ctx.fillStyle = above ? '#e8e820' : color;
-      ctx.beginPath();
-      ctx.arc(ac_x, ac_y, 4, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Crosshair lines through dot
-      ctx.strokeStyle = above ? '#e8e820' : color;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(ac_x - 8, ac_y); ctx.lineTo(ac_x + 8, ac_y);
-      ctx.moveTo(ac_x, ac_y - 8); ctx.lineTo(ac_x, ac_y + 8);
-      ctx.stroke();
-
-      // Deviation label
-      const devFt = Math.round(altFt - gsAltAtDist);
-      ctx.fillStyle = above ? '#e8e820' : color;
-      ctx.textAlign = 'left';
-      ctx.font = 'bold 9px Share Tech Mono, monospace';
-      ctx.fillText((devFt > 0 ? '+' : '') + Math.round(devFt / 100) * 100 + 'FT', ac_x + 7, ac_y - 3);
     }
 
     // ── ICAO airline designator → name (for airlines serving SYD)
@@ -405,7 +247,6 @@
       document.getElementById('counter').textContent = ctr;
 
       fetchPhoto(reg, f.hex || '', type);
-      drawProfile('dm-canvas', distSyd, altFt, '#ff6600', '#1a0a00', '#7a3300');
       updateMap(f.lat, f.lon, call);
     }
 
@@ -544,7 +385,6 @@
     });
 
     initMap();
-    resizeCanvas();
     fetchFlights();
   </script>
 </body>
