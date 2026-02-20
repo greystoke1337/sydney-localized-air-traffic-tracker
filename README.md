@@ -9,11 +9,11 @@ A real-time tracker that shows **which aircraft are flying directly above any Au
 ## Features
 
 ### Location & Filtering
-- **Suburb geofence** — type any Australian suburb and the tracker instantly re-centres around it; defaults to Russell Lea
+- **Worldwide location search** — type any city, suburb, or address anywhere in the world; defaults to Russell Lea, Sydney
 - **Adjustable geofence radius** — slider from 2km to 20km; the map circle updates live and the next auto-refresh applies the new radius
 - **Altitude floor** — slider from 200ft to 5,000ft filters out low-flying helicopters or taxiing aircraft
-- **Persisted settings** — suburb, geofence radius, altitude floor, and scanline intensity are all saved to `localStorage` and restored on next visit
-- **Share link** — the ↗ SHARE button copies a `?suburb=` URL to the clipboard; anyone opening it lands directly on your location
+- **Persisted settings** — location, geofence radius, and altitude floor are saved to `localStorage` and restored on next visit
+- **Share link** — the ↗ SHARE button copies a `?location=` URL to the clipboard; anyone opening it lands directly on your location
 
 ### Live Data
 - **Live ADS-B data** via [airplanes.live](https://airplanes.live) — free, no API key required
@@ -35,7 +35,7 @@ A real-time tracker that shows **which aircraft are flying directly above any Au
 ### Visual Design
 - **Phase colour bleed** — the info block's left border and glow change colour with flight phase (red for landing, green for climbing, amber for approach)
 - **Altitude bar** — a thin vertical bar on the info block fills proportionally to altitude (0–45,000ft)
-- **Scanline intensity slider** — controls the CRT phosphor-screen effect from 0% (off) to 60% (heavy); saved across sessions
+- **CRT scanline effect** — a fixed 5% opacity horizontal line overlay for the dot-matrix aesthetic
 - **Aircraft photo** — fetched automatically from [Planespotters.net](https://planespotters.net) by registration, displayed as a hero image with a halftone dot overlay
 
 ### Navigation & UX
@@ -49,7 +49,7 @@ A real-time tracker that shows **which aircraft are flying directly above any Au
 
 ## How It Works
 
-1. Geocodes the entered suburb via Nominatim (OpenStreetMap) — no API key needed; searches across Australia
+1. Geocodes the entered location via Nominatim (OpenStreetMap) — no API key needed; works worldwide
 2. Queries airplanes.live for all aircraft within a radius derived from the geofence size (4× the geofence in nautical miles, to cast a wider net)
 3. Filters precisely to aircraft within the geofence radius and above the altitude floor
 4. Sorts by distance to suburb — closest overhead first
@@ -86,9 +86,9 @@ open index.html
 ## Roadmap
 
 - [x] Map view of approach path
-- [x] Suburb geofence — track aircraft above any location
+- [x] Location geofence — track aircraft above any location worldwide
 - [x] Adjustable geofence radius and altitude floor sliders
-- [x] Persist last suburb and settings across sessions
+- [x] Persist last location and settings across sessions
 - [x] Manual refresh button
 - [x] Responsive layout / mobile support
 - [x] Speed-scaled heading vector on map
@@ -97,7 +97,6 @@ open index.html
 - [x] Sound alert on new #1 aircraft
 - [x] Session flight log
 - [x] Share link via URL param
-- [x] Scanline intensity control
 - [x] Full aircraft type name database
 - [ ] Airline logo display
 - [ ] Push notification when a specific flight appears overhead
