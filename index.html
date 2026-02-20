@@ -49,9 +49,10 @@
       text-shadow: 0 0 6px var(--c-glow);
     }
     #suburb-input::placeholder { color: var(--c-dim); text-shadow: none; }
-    #geofence-status { font-size: 0.75rem; opacity: 0.6; margin: 0 0 8px; }
+    #geofence-ctrl { font-size: 0.75rem; opacity: 0.8; margin: 0 0 8px; display:flex; align-items:center; gap:8px; }
+    #geofence-slider { flex:1; accent-color:var(--c-main); cursor:pointer; }
     /* Photo */
-    .photo-wrap { position:relative; display:block; margin-top:10px; z-index: 0; }
+    .photo-wrap { position:relative; display:block; margin-top:10px; z-index: 0; border:1px solid var(--c-dim); }
     .photo-wrap::after {
       content:''; position:absolute; inset:0; pointer-events:none; z-index: 1;
       background-image: radial-gradient(circle, var(--c-overlay) 1px, transparent 1px);
@@ -84,7 +85,11 @@
       <input id="suburb-input" value="Russell Lea" placeholder="Enter suburb...">
       <button onclick="setLocation()">SET LOCATION</button>
     </div>
-    <p id="geofence-status">GEOFENCE RADIUS: 5KM</p>
+    <div id="geofence-ctrl">
+      <span>GEOFENCE</span>
+      <input type="range" id="geofence-slider" min="2" max="20" value="5" step="1">
+      <span id="geofence-label">5 KM</span>
+    </div>
     <p id="error"></p>
     <p id="info">LOADING...</p>
     <p id="main"></p>
@@ -103,8 +108,8 @@
   </div>
   <script>
     const SYD_LAT = -33.9461, SYD_LON = 151.1772;
-    const GEOFENCE_KM = 5;
-    const API_RADIUS_NM = Math.ceil((GEOFENCE_KM / 1.852) * 4);
+    let geofenceKm = 5;
+    function apiRadiusNm() { return Math.ceil((geofenceKm / 1.852) * 4); }
 
     let suburbName = 'RUSSELL LEA';
     let suburbLat = -33.8598, suburbLon = 151.1369;
@@ -167,22 +172,55 @@
     // ── ICAO airline designator → name (for airlines serving SYD)
     const AIRLINE_DB = {
       QFA:'QANTAS',         VOZ:'VIRGIN AUSTRALIA', JST:'JETSTAR',
-      TGW:'TIGERAIR',       RXA:'REX',              NWL:'NETWORK AVIATION',
+      RXA:'REX',            NWL:'NETWORK AVIATION',
       UAE:'EMIRATES',       ETD:'ETIHAD',            QTR:'QATAR AIRWAYS',
       SIA:'SINGAPORE AIR',  MAS:'MALAYSIA AIRLINES', CPA:'CATHAY PACIFIC',
       ANZ:'AIR NEW ZEALAND',FJI:'FIJI AIRWAYS',      THA:'THAI AIRWAYS',
-      GIA:'GARUDA',         PAL:'PHILIPPINE AIR',    AIQ:'THAI AIRASIA X',
-      XAX:'AIRASIA X',      VNA:'VIETNAM AIRLINES',  EVA:'EVA AIR',
-      CCA:'AIR CHINA',      CSN:'CHINA SOUTHERN',    CES:'CHINA EASTERN',
-      KAL:'KOREAN AIR',     AAR:'ASIANA',            ANA:'ANA',
-      JAL:'JAPAN AIRLINES', AAL:'AMERICAN AIRLINES', UAL:'UNITED AIRLINES',
-      DAL:'DELTA AIR LINES',ACA:'AIR CANADA',        BAW:'BRITISH AIRWAYS',
-      AFR:'AIR FRANCE',     DLH:'LUFTHANSA',         HAL:'HAWAIIAN AIRLINES',
+      THY:'TURKISH AIRLINES',GIA:'GARUDA',           PAL:'PHILIPPINE AIR',
+      AIQ:'THAI AIRASIA X', XAX:'AIRASIA X',         VNA:'VIETNAM AIRLINES',
+      EVA:'EVA AIR',        CCA:'AIR CHINA',         CSN:'CHINA SOUTHERN',
+      CES:'CHINA EASTERN',  KAL:'KOREAN AIR',        AAR:'ASIANA',
+      ANA:'ANA',            JAL:'JAPAN AIRLINES',    AAL:'AMERICAN AIRLINES',
+      UAL:'UNITED AIRLINES',DAL:'DELTA AIR LINES',   ACA:'AIR CANADA',
+      BAW:'BRITISH AIRWAYS',AFR:'AIR FRANCE',        DLH:'LUFTHANSA',
+      HAL:'HAWAIIAN AIRLINES',
     };
     function airlineFromCallsign(callsign) {
       if (!callsign || callsign === '---') return '---';
       const prefix = callsign.match(/^[A-Z]+/)?.[0] || '';
       return AIRLINE_DB[prefix] || prefix || '---';
+    }
+
+    // ── ADS-B emitter category → human label
+    const CATEGORY_DB = {
+      A1:'LIGHT', A2:'SMALL', A3:'LARGE', A4:'B757 CLASS', A5:'HEAVY',
+      A6:'HIGH PERF', A7:'ROTORCRAFT', B1:'GLIDER', B2:'AIRSHIP',
+      B4:'SKYDIVER', B6:'UAV', B7:'SPACECRAFT', C1:'GROUND VEH',
+    };
+    function formatType(t, category) {
+      const typeCode = (t || '').toUpperCase();
+      const cat = (category || '').toUpperCase();
+      const catLabel = CATEGORY_DB[cat];
+      if (typeCode && catLabel) return typeCode + ' (' + catLabel + ')';
+      if (typeCode) return typeCode;
+      if (catLabel) return catLabel;
+      return cat || '---';
+    }
+
+    // ── Emergency squawk formatting
+    const EMERG_SQUAWKS = { '7700':'MAYDAY', '7600':'NORDO', '7500':'HIJACK' };
+    function formatSquawk(sqk) {
+      if (!sqk || sqk === '---') return '---';
+      const emerg = EMERG_SQUAWKS[sqk];
+      if (emerg) return '<span style="color:#ff2020;text-shadow:0 0 8px #ff0000;">' + sqk + ' \u26a0 ' + emerg + '</span>';
+      return sqk;
+    }
+
+    // ── Altitude: FL above transition altitude, QNH below
+    function formatAlt(alt) {
+      if (typeof alt !== 'number') return '---';
+      if (alt >= 10000) return 'FL' + String(Math.round(alt / 100)).padStart(3, '0');
+      return alt.toLocaleString() + ' FT QNH';
     }
 
     // ── Map
@@ -203,9 +241,10 @@
       const t = THEMES[currentTheme];
       if (geofenceCircle) {
         geofenceCircle.setLatLng([suburbLat, suburbLon]);
+        geofenceCircle.setRadius(geofenceKm * 1000);
       } else {
         geofenceCircle = L.circle([suburbLat, suburbLon], {
-          radius: GEOFENCE_KM * 1000,
+          radius: geofenceKm * 1000,
           color: t.main, fillColor: t.main, fillOpacity: 0.05,
           weight: 1, dashArray: '5 5'
         }).addTo(map);
@@ -252,33 +291,36 @@
       const ctr = '[' + (flightIndex+1) + '/' + flights.length + ']';
       const distLoc = haversineKm(suburbLat, suburbLon, f.lat, f.lon);
       const distSyd = haversineKm(SYD_LAT, SYD_LON, f.lat, f.lon);
-      const altStr = typeof f.alt_baro === 'number' ? f.alt_baro.toLocaleString() + ' FT' : '---';
+      const altStr = formatAlt(f.alt_baro);
       const spd = f.gs ? Math.round(f.gs) + ' KT' : '---';
       const vs = f.baro_rate ? (f.baro_rate > 0 ? '+' : '') + f.baro_rate + ' FPM' : '---';
       const hdg = f.track ? Math.round(f.track) + '°' : '---';
       const call = (f.flight || '---').trim().toUpperCase();
-      const type = (f.t || f.category || '---').toUpperCase();
+      const typeStr = formatType(f.t, f.category);
       const reg = (f.r || '---').toUpperCase();
-      const sqk = f.squawk || '---';
+      const sqkStr = formatSquawk(f.squawk || '---');
 
       const airline = airlineFromCallsign(call);
+      const callLink = call !== '---'
+        ? '<a href="https://www.flightaware.com/live/flight/' + call + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">' + call + '</a>'
+        : '---';
 
       document.getElementById('info').innerHTML =
-        'FLIGHT&nbsp;&nbsp; ' + call + '<br>' +
+        'FLIGHT&nbsp;&nbsp; ' + callLink + '<br>' +
         'REG&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ' + reg + '<br>' +
-        'TYPE&nbsp;&nbsp;&nbsp;&nbsp; ' + type + '<br>' +
+        'TYPE&nbsp;&nbsp;&nbsp;&nbsp; ' + typeStr + '<br>' +
         'AIRLINE&nbsp; ' + airline;
       document.getElementById('main').innerHTML =
         'ALT&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ' + altStr + '<br>' +
         'SPEED&nbsp;&nbsp;&nbsp; ' + spd + '<br>' +
         'V/SPEED&nbsp; ' + vs + '<br>' +
-        'HEADING&nbsp; ' + hdg + '<br>' +
+        'GND TRK&nbsp; ' + hdg + '<br>' +
         'DIST LOC&nbsp; ' + distLoc.toFixed(1) + ' KM<br>' +
         'DIST SYD&nbsp; ' + distSyd.toFixed(1) + ' KM<br>' +
-        'SQUAWK&nbsp;&nbsp; ' + sqk;
+        'SQUAWK&nbsp;&nbsp; ' + sqkStr;
       document.getElementById('counter').textContent = ctr;
 
-      fetchPhoto(reg, f.hex || '', type);
+      fetchPhoto(reg, f.hex || '', (f.t || '').toUpperCase());
       updateMap(f.lat, f.lon, call);
     }
 
@@ -371,13 +413,13 @@
       document.getElementById('info').textContent = 'FETCHING DATA...';
       document.getElementById('error').textContent = '';
       try {
-        const url = 'https://api.airplanes.live/v2/point/' + suburbLat + '/' + suburbLon + '/' + API_RADIUS_NM;
+        const url = 'https://api.airplanes.live/v2/point/' + suburbLat + '/' + suburbLon + '/' + apiRadiusNm();
         const res = await fetch(url, { signal });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         let ac = (data.ac || []).filter(f =>
-          typeof f.alt_baro === 'number' && f.lat && f.lon &&
-          haversineKm(suburbLat, suburbLon, f.lat, f.lon) <= GEOFENCE_KM
+          typeof f.alt_baro === 'number' && f.alt_baro >= 500 && f.lat && f.lon &&
+          haversineKm(suburbLat, suburbLon, f.lat, f.lon) <= geofenceKm
         );
         ac.sort((a, b) =>
           haversineKm(suburbLat, suburbLon, a.lat, a.lon) -
@@ -411,6 +453,25 @@
     });
     document.getElementById('suburb-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') setLocation();
+    });
+
+    // ── Geofence slider
+    (function () {
+      try {
+        const saved = parseInt(localStorage.getItem('geofenceKm'), 10);
+        if (saved >= 2 && saved <= 20) {
+          geofenceKm = saved;
+          document.getElementById('geofence-slider').value = saved;
+          document.getElementById('geofence-label').textContent = saved + ' KM';
+        }
+      } catch(e) {}
+    })();
+    document.getElementById('geofence-slider').addEventListener('input', function () {
+      geofenceKm = parseInt(this.value, 10);
+      document.getElementById('geofence-label').textContent = geofenceKm + ' KM';
+      if (geofenceCircle) updateGeofenceCircle();
+      try { localStorage.setItem('geofenceKm', geofenceKm); } catch(e) {}
+      fetchFlights();
     });
 
     initMap();
