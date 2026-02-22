@@ -195,6 +195,25 @@
     #main-grid .data-item { display: flex; flex-direction: column; }
     #main-grid .data-label { font-size: 0.6rem; opacity: 0.6; letter-spacing: 0.05em; }
     #main-grid .data-value { font-size: 0.82rem; }
+
+    /* Emergency squawk banner */
+    #emerg-banner {
+      display: none;
+      margin: 8px 0;
+      padding: 10px 12px;
+      border: 2px solid #ff2020;
+      background: rgba(255,0,0,0.08);
+      color: #ff2020;
+      text-shadow: 0 0 10px #ff0000;
+      font-size: 0.85rem;
+      animation: emerg-flash 0.8s step-end infinite;
+      cursor: pointer;
+    }
+    #emerg-banner.visible { display: block; }
+    @keyframes emerg-flash {
+      0%, 100% { border-color: #ff2020; background: rgba(255,0,0,0.08); }
+      50%       { border-color: #ff6060; background: rgba(255,0,0,0.18); }
+    }
   </style>
 </head>
 <body class="dotmatrix">
@@ -225,6 +244,9 @@
     </div>
 
     <p id="error"></p>
+
+    <!-- Emergency squawk banner — visible when any in-range flight squawks emergency -->
+    <div id="emerg-banner" onclick="dismissEmergency()"></div>
 
     <!-- Flight info: left border + altitude bar + primary/secondary data -->
     <div id="info-wrap">
@@ -262,7 +284,7 @@
 
     <div id="footer-row">
       <span id="counter"></span>
-      <span id="proxy-status" style="font-size:0.65rem;opacity:0.5;"></span>
+      <span id="proxy-status" style="font-size:0.65rem;opacity:0.7;letter-spacing:0.03em;"></span>
       <span id="refresh-timer"></span>
     </div>
 
@@ -466,6 +488,58 @@
       return { label: '── OVERHEAD', color: null, cls: '' };
     }
 
+
+
+    // ── Emergency squawk alert ───────────────────────────────────────
+    const EMERG_LABELS = { '7700':'⚠ MAYDAY', '7600':'⚠ NORDO', '7500':'⚠ HIJACK' };
+    let emergencyDismissed = new Set(); // squawks the user has dismissed this session
+
+    function playEmergencyAlarm() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // Two-tone urgent alarm
+      [0, 0.35].forEach(offset => {
+        const osc  = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(offset === 0 ? 660 : 880, audioCtx.currentTime + offset);
+        gain.gain.setValueAtTime(0.4, audioCtx.currentTime + offset);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + offset + 0.3);
+        osc.start(audioCtx.currentTime + offset);
+        osc.stop(audioCtx.currentTime + offset + 0.3);
+      });
+    }
+
+    function checkEmergencySquawks() {
+      const emergFlights = flights.filter(f => {
+        const sqk = f.squawk || '';
+        return EMERG_LABELS[sqk] && !emergencyDismissed.has(f.hex + sqk);
+      });
+
+      const banner = document.getElementById('emerg-banner');
+      if (!emergFlights.length) {
+        banner.classList.remove('visible');
+        return;
+      }
+
+      // Build banner text — list all emergency flights
+      const lines = emergFlights.map(f => {
+        const call  = (f.flight || '???').trim().toUpperCase();
+        const label = EMERG_LABELS[f.squawk];
+        return label + ' — ' + call + ' (' + f.squawk + ')';
+      });
+      banner.innerHTML = lines.join('<br>') + '<br><span style="font-size:0.65rem;opacity:0.6;">TAP TO DISMISS</span>';
+      banner.classList.add('visible');
+      playEmergencyAlarm();
+    }
+
+    function dismissEmergency() {
+      // Mark all currently showing emergency flights as dismissed
+      flights.forEach(f => {
+        if (EMERG_LABELS[f.squawk || '']) emergencyDismissed.add(f.hex + f.squawk);
+      });
+      document.getElementById('emerg-banner').classList.remove('visible');
+    }
 
     // ── Sound ────────────────────────────────────────────────────────
     // Synthesised radar ping via Web Audio API — no audio files needed.
@@ -977,16 +1051,23 @@
       document.getElementById('info-wrap').classList.add('fetching');
       document.getElementById('fetch-dot').classList.add('active');
       try {
-        // Try proxy first; fall back to airplanes.live directly if it fails
+        // Try proxy first (6s timeout); fall back to airplanes.live directly if it fails
         let res;
         try {
-          res = await fetch(buildUrl(PROXY_URL), { signal });
+          const proxySignal = AbortSignal.any
+            ? AbortSignal.any([signal, AbortSignal.timeout(6000)])
+            : signal;
+          res = await fetch(buildUrl(PROXY_URL), { signal: proxySignal });
           if (!res.ok) throw new Error('proxy HTTP ' + res.status);
-          document.getElementById('proxy-status').textContent = '';
+          document.getElementById('proxy-status').textContent = '🟢 VIA PROXY';
         } catch(proxyErr) {
-          if (proxyErr.name === 'AbortError') throw proxyErr;
+          if (proxyErr.name === 'AbortError' && !signal.aborted) {
+            // Timeout hit — fall through to direct
+          } else if (signal.aborted) {
+            throw proxyErr; // manual abort, don't fall back
+          }
           console.warn('Proxy failed, falling back to airplanes.live:', proxyErr.message);
-          document.getElementById('proxy-status').textContent = '⚡ DIRECT';
+          document.getElementById('proxy-status').textContent = '🔴 DIRECT (PROXY DOWN)';
           res = await fetch(buildUrl(DIRECT_URL), { signal });
           if (!res.ok) throw new Error('HTTP ' + res.status);
         }
@@ -1010,6 +1091,7 @@
           return;
         }
         flights = ac; flightIndex = 0;
+        checkEmergencySquawks();
         render(flights[0]);
       } catch(e) {
         if (e.name === 'AbortError') return;
