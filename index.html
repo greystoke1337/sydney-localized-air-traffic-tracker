@@ -765,7 +765,7 @@
       document.getElementById('error').textContent = '';
       try {
         const res = await fetch(
-          'http://192.168.86.24:3000/flights?lat=' + locationLat + '&lon=' + locationLon + '&radius=' + apiRadiusNm(),
+          'https://api.overheadtracker.com/flights?lat=' + locationLat + '&lon=' + locationLon + '&radius=' + apiRadiusNm(),
           { signal }
         );
         if (!res.ok) throw new Error('HTTP ' + res.status);
