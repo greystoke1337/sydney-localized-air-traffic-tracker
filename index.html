@@ -755,8 +755,18 @@
 
 
     // ── Fetch flights ────────────────────────────────────────────────
-    // Queries airplanes.live, filters to geofence + alt floor, sorts by distance.
+    // Queries proxy first, falls back to airplanes.live directly if proxy is down.
     // Aborts any in-progress request first to prevent stale data overwrites.
+    const PROXY_URL  = 'https://api.overheadtracker.com/flights?lat={LAT}&lon={LON}&radius={R}';
+    const DIRECT_URL = 'https://api.airplanes.live/v2/point/{LAT}/{LON}/{R}';
+
+    function buildUrl(template) {
+      return template
+        .replace(/{LAT}/g, locationLat)
+        .replace(/{LON}/g, locationLon)
+        .replace(/{R}/g,   apiRadiusNm());
+    }
+
     async function fetchFlights() {
       if (fetchController) fetchController.abort();
       fetchController = new AbortController();
@@ -764,11 +774,18 @@
       document.getElementById('info').textContent  = 'FETCHING DATA...';
       document.getElementById('error').textContent = '';
       try {
-        const res = await fetch(
-          'https://api.overheadtracker.com/flights?lat=' + locationLat + '&lon=' + locationLon + '&radius=' + apiRadiusNm(),
-          { signal }
-        );
-        if (!res.ok) throw new Error('HTTP ' + res.status);
+        // Try proxy first; fall back to airplanes.live directly if it fails
+        let res;
+        try {
+          res = await fetch(buildUrl(PROXY_URL), { signal });
+          if (!res.ok) throw new Error('proxy HTTP ' + res.status);
+        } catch(proxyErr) {
+          if (proxyErr.name === 'AbortError') throw proxyErr;
+          console.warn('Proxy failed, falling back to airplanes.live:', proxyErr.message);
+          document.getElementById('error').textContent = 'PROXY UNAVAILABLE — USING DIRECT';
+          res = await fetch(buildUrl(DIRECT_URL), { signal });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+        }
         const data = await res.json();
         let ac = (data.ac || []).filter(f =>
           typeof f.alt_baro === 'number' && f.alt_baro >= altFloorFt &&
