@@ -2,7 +2,7 @@
 
 A real-time tracker that shows **which aircraft are flying directly above any location in the world**, built as a single HTML file with no dependencies or backend required.
 
-🔗 **Live:** https://greystoke1337.github.io/sydney-localized-air-traffic-tracker
+🔗 **Live:** https://greystoke1337.github.io/localized-air-traffic-tracker/
 
 ---
 
