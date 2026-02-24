@@ -196,6 +196,79 @@
     #main-grid .data-label { font-size: 0.6rem; opacity: 0.6; letter-spacing: 0.05em; }
     #main-grid .data-value { font-size: 0.82rem; }
 
+    /* ── Hover tooltips ── */
+    [data-tip] {
+      position: relative;
+      cursor: help;
+    }
+    [data-tip]::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1a0a00;
+      border: 1px solid var(--c-main);
+      color: var(--c-main);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem;
+      padding: 5px 8px;
+      white-space: pre-line;
+      text-align: left;
+      min-width: 160px;
+      max-width: 240px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 999;
+      line-height: 1.5;
+      text-shadow: 0 0 4px var(--c-glow);
+      box-shadow: 0 0 12px rgba(255,166,0,0.2);
+    }
+    /* Arrow */
+    [data-tip]::before {
+      content: '';
+      position: absolute;
+      bottom: calc(100% + 1px);
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: var(--c-main);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 999;
+    }
+    [data-tip]:hover::after,
+    [data-tip]:hover::before { opacity: 1; }
+
+    /* Tooltip anchored to the left edge on data items (avoids screen overflow) */
+    .data-item[data-tip]::after { left: 0; transform: none; }
+    .data-item[data-tip]::before { left: 12px; transform: none; }
+
+    /* ── Colour-coded data values ── */
+    /* Altitude bands */
+    .alt-ground  { color: #ff6060; text-shadow: 0 0 8px #ff4040 !important; }
+    .alt-low     { color: #ffcc40; text-shadow: 0 0 8px #ffaa00 !important; }
+    .alt-mid     { color: var(--c-main); }
+    .alt-high    { color: #60e8ff; text-shadow: 0 0 8px #40c8ff !important; }
+    .alt-vhigh   { color: #a0a0ff; text-shadow: 0 0 8px #8080ff !important; }
+
+    /* Vertical speed */
+    .vs-climbing   { color: #60ff90; text-shadow: 0 0 8px #40dd70 !important; }
+    .vs-descending { color: #ff6060; text-shadow: 0 0 8px #ff4040 !important; }
+    .vs-level      { color: var(--c-main); }
+
+    /* Speed bands */
+    .spd-slow   { color: var(--c-dim); }
+    .spd-normal { color: var(--c-main); }
+    .spd-fast   { color: #60e8ff; text-shadow: 0 0 8px #40c8ff !important; }
+
+    /* Distance proximity */
+    .dist-close  { color: #ff9040; text-shadow: 0 0 8px #ff7000 !important; }
+    .dist-medium { color: var(--c-main); }
+    .dist-far    { color: var(--c-dim); }
+
     /* Emergency squawk banner */
     #emerg-banner {
       display: none;
@@ -231,14 +304,14 @@
 
     <!-- GEOFENCE: search radius. Label updates live; API refreshes on next 15s cycle. -->
     <div class="slider-ctrl">
-      <span>GEOFENCE</span>
+      <span data-tip="Search radius around your location.&#10;Only aircraft within this circle are shown.&#10;Larger = more results but slower.">GEOFENCE</span>
       <input type="range" id="geofence-slider" min="2" max="20" value="5" step="1">
       <span id="geofence-label">5 KM</span>
     </div>
 
     <!-- ALT FLOOR: hide aircraft below this altitude -->
     <div class="slider-ctrl">
-      <span>ALT FLOOR</span>
+      <span data-tip="Hide aircraft below this altitude.&#10;Useful to filter out ground vehicles&#10;and very low-level traffic.">ALT FLOOR</span>
       <input type="range" id="altfloor-slider" min="200" max="5000" value="500" step="100">
       <span id="altfloor-label">500 FT</span>
     </div>
@@ -254,12 +327,12 @@
       <div id="info">LOADING...</div>
     </div>
     <div id="main-grid">
-      <div class="data-item"><span class="data-label">ALT</span><span class="data-value" id="d-alt">---</span></div>
-      <div class="data-item"><span class="data-label">SPEED</span><span class="data-value" id="d-spd">---</span></div>
-      <div class="data-item"><span class="data-label">V/SPEED</span><span class="data-value" id="d-vs">---</span></div>
-      <div class="data-item"><span class="data-label">GND TRK</span><span class="data-value" id="d-hdg">---</span></div>
-      <div class="data-item"><span class="data-label">DIST LOC</span><span class="data-value" id="d-dist">---</span></div>
-      <div class="data-item"><span class="data-label">SQUAWK</span><span class="data-value" id="d-sqk">---</span></div>
+      <div class="data-item" data-tip="Barometric altitude above sea level.&#10;Red=below 1000ft  Yellow=1000–10000ft&#10;Amber=normal  Blue=above 35000ft"><span class="data-label">ALT</span><span class="data-value" id="d-alt">---</span></div>
+      <div class="data-item" data-tip="Ground speed in knots.&#10;1 kt ≈ 1.85 km/h&#10;Dim=slow  Amber=normal  Blue=fast (500kt+)"><span class="data-label">SPEED</span><span class="data-value" id="d-spd">---</span></div>
+      <div class="data-item" data-tip="Vertical speed in feet per minute.&#10;Green = climbing&#10;Red = descending&#10;Amber = level flight"><span class="data-label">V/SPEED</span><span class="data-value" id="d-vs">---</span></div>
+      <div class="data-item" data-tip="Ground track heading in degrees.&#10;0°=North  90°=East&#10;180°=South  270°=West"><span class="data-label">GND TRK</span><span class="data-value" id="d-hdg">---</span></div>
+      <div class="data-item" data-tip="Straight-line distance from your&#10;set location to the aircraft.&#10;Orange = very close (under 3km)"><span class="data-label">DIST LOC</span><span class="data-value" id="d-dist">---</span></div>
+      <div class="data-item" data-tip="Transponder squawk code.&#10;7700 = Emergency (MAYDAY)&#10;7600 = Radio failure (NORDO)&#10;7500 = Hijack  1200 = VFR"><span class="data-label">SQUAWK</span><span class="data-value" id="d-sqk">---</span></div>
     </div>
 
     <div id="dm-map"></div>
@@ -274,12 +347,12 @@
 
     <!-- PREV/NEXT: browse flights | NEAREST: jump to closest | SND: ping toggle | SHARE: copy URL -->
     <div id="btn-row">
-      <button onclick="prev()">&#9664; PREV</button>
-      <button onclick="next()">NEXT &#9654;</button>
-      <button onclick="go(0)">NEAREST</button>
-      <button onclick="manualRefresh()">REFRESH</button>
-      <button onclick="toggleSound()" id="sound-btn">🔇 SND</button>
-      <button onclick="shareUrl()">&#x2197; SHARE</button>
+      <button onclick="prev()" data-tip="Show previous aircraft&#10;in the list (sorted by&#10;distance from you)">&#9664; PREV</button>
+      <button onclick="next()" data-tip="Show next aircraft&#10;in the list (sorted by&#10;distance from you)">NEXT &#9654;</button>
+      <button onclick="go(0)" data-tip="Jump to the closest&#10;aircraft to your location">NEAREST</button>
+      <button onclick="manualRefresh()" data-tip="Force a data refresh&#10;(auto-refreshes every 15s)">REFRESH</button>
+      <button onclick="toggleSound()" id="sound-btn" data-tip="Toggle radar ping sound&#10;when a new closest aircraft&#10;is detected">🔇 SND</button>
+      <button onclick="shareUrl()" data-tip="Copy a shareable link&#10;with your current location&#10;pre-filled">&#x2197; SHARE</button>
     </div>
 
     <div id="footer-row">
@@ -834,8 +907,8 @@
     function updateRouteDisplay(routeStr) {
       const info = document.getElementById('info');
       // Remove any existing route line, then append
-      info.innerHTML = info.innerHTML.replace(/<br>ROUTE.*$/s, '');
-      if (routeStr) info.innerHTML += '<br>ROUTE&nbsp;&nbsp;&nbsp; ' + routeStr;
+      info.innerHTML = info.innerHTML.replace(/<br><span[^>]*>ROUTE<\/span>.*$/s, '');
+      if (routeStr) info.innerHTML += '<br><span style="opacity:0.45;font-size:0.85em;">ROUTE</span>&nbsp;&nbsp;&nbsp; <span style="color:#a0d8ef;text-shadow:0 0 6px #6090b0;">' + routeStr + '</span>';
     }
 
     // Looks up route by callsign from adsbdb.com, falls back gracefully.
@@ -899,18 +972,22 @@
 
       document.getElementById('info-wrap').className = phase.cls || '';
 
+      // Dim label style for the info block keys
+      const lbl = '<span style="opacity:0.45;font-size:0.85em;">';
+      const endlbl = '</span>';
+
       // Try inline route from ADS-B data first
       const inlineDep = f.dep || f.orig_iata || null;
       const inlineArr = f.arr || f.dest_iata || null;
       const inlineRoute = formatRoute(inlineDep, inlineArr);
 
       document.getElementById('info').innerHTML =
-        'FLIGHT&nbsp;&nbsp; ' + callLink + '<br>' +
-        'REG&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ' + reg + '<br>' +
-        'TYPE&nbsp;&nbsp;&nbsp;&nbsp; ' + typeStr + '<br>' +
-        'AIRLINE&nbsp; ' + airline + '<br>' +
-        'PHASE&nbsp;&nbsp;&nbsp; ' + phaseHtml +
-        (inlineRoute ? '<br>ROUTE&nbsp;&nbsp;&nbsp; ' + inlineRoute : '');
+        lbl+'FLIGHT'+endlbl+'&nbsp;&nbsp; ' + callLink + '<br>' +
+        lbl+'REG'+endlbl+'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ' + reg + '<br>' +
+        lbl+'TYPE'+endlbl+'&nbsp;&nbsp;&nbsp;&nbsp; ' + typeStr + '<br>' +
+        lbl+'AIRLINE'+endlbl+'&nbsp; ' + airline + '<br>' +
+        lbl+'PHASE'+endlbl+'&nbsp;&nbsp;&nbsp; ' + phaseHtml +
+        (inlineRoute ? '<br>' + lbl+'ROUTE'+endlbl+'&nbsp;&nbsp;&nbsp; <span style="color:#a0d8ef;text-shadow:0 0 6px #6090b0;">' + inlineRoute + '</span>' : '');
 
       // If no inline route, async lookup from adsbdb (updates display when ready)
       if (!inlineRoute && call !== '---') {
@@ -920,15 +997,52 @@
         });
       }
 
-      document.getElementById('d-alt').textContent  = altStr;
-      document.getElementById('d-spd').textContent  = spd;
-      document.getElementById('d-vs').innerHTML     = vs;
       document.getElementById('d-hdg').textContent  = hdg;
-      document.getElementById('d-dist').textContent = distLoc.toFixed(1) + ' KM';
       document.getElementById('d-sqk').innerHTML    = sqkStr;
 
       document.getElementById('counter').textContent = ctr;
       updateAltBar(f.alt_baro);
+
+      // ── Colour-code data values ──────────────────────────────────
+      // Altitude colour bands
+      const altEl = document.getElementById('d-alt');
+      altEl.textContent = altStr;
+      altEl.className = 'data-value';
+      if (typeof f.alt_baro === 'number') {
+        if      (f.alt_baro < 1000)  altEl.classList.add('alt-ground');
+        else if (f.alt_baro < 10000) altEl.classList.add('alt-low');
+        else if (f.alt_baro < 35000) altEl.classList.add('alt-mid');
+        else if (f.alt_baro < 45000) altEl.classList.add('alt-high');
+        else                          altEl.classList.add('alt-vhigh');
+      }
+
+      // Speed colour bands
+      const spdEl = document.getElementById('d-spd');
+      spdEl.textContent = spd;
+      spdEl.className = 'data-value';
+      if (typeof f.gs === 'number') {
+        if      (f.gs < 150) spdEl.classList.add('spd-slow');
+        else if (f.gs < 500) spdEl.classList.add('spd-normal');
+        else                  spdEl.classList.add('spd-fast');
+      }
+
+      // Vertical speed colour
+      const vsEl = document.getElementById('d-vs');
+      vsEl.innerHTML = vs;
+      vsEl.className = 'data-value';
+      if (typeof f.baro_rate === 'number') {
+        if      (f.baro_rate >  100) vsEl.classList.add('vs-climbing');
+        else if (f.baro_rate < -100) vsEl.classList.add('vs-descending');
+        else                          vsEl.classList.add('vs-level');
+      }
+
+      // Distance proximity colour
+      const distEl = document.getElementById('d-dist');
+      distEl.textContent = distLoc.toFixed(1) + ' KM';
+      distEl.className = 'data-value';
+      if      (distLoc < 3)  distEl.classList.add('dist-close');
+      else if (distLoc < 10) distEl.classList.add('dist-medium');
+      else                    distEl.classList.add('dist-far');
 
       // Play ping when a new aircraft becomes #1 closest
       if (flightIndex === 0 && f.hex !== prevTopHex) {
