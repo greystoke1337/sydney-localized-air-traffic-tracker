@@ -15,6 +15,7 @@
 #include <ArduinoJson.h>
 #include <SD.h>
 #include <math.h>
+#include <Preferences.h>
 
 TFT_eSPI tft = TFT_eSPI();
 
@@ -62,6 +63,24 @@ char  LOCATION_NAME[32] = "RUSSELL LEA";
 // ─── SD state ─────────────────────────────────────────
 bool sdAvailable = false;
 
+// ─── Location presets ─────────────────────────────────
+struct LocPreset { const char* name; float lat; float lon; };
+const LocPreset LOC_PRESETS[] = {
+  {"RUSSELL LEA", -33.8598f, 151.1369f},
+  {"SYDNEY ARPT", -33.9461f, 151.1772f},
+};
+const int LOC_COUNT = sizeof(LOC_PRESETS) / sizeof(LOC_PRESETS[0]);
+int locIndex = 0;
+
+// ─── Touch ────────────────────────────────────────────
+uint16_t touchCalData[5] = {0};
+bool     touchReady      = false;
+uint32_t lastTouchMs     = 0;
+#define  TOUCH_DEBOUNCE_MS  700
+// Location button zone in header (x range, full header height)
+#define  LOC_BTN_X1  195
+#define  LOC_BTN_X2  355
+
 // ─── Flight status ────────────────────────────────────
 enum FlightStatus {
   STATUS_UNKNOWN,
@@ -95,13 +114,15 @@ Flight flights[20];
 Flight newFlights[20];
 
 // global — keeps off the stack
-int    flightCount  = 0;
-int    flightIndex  = 0;
-int    countdown    = REFRESH_SECS;
-bool   isFetching   = false;
-bool   usingCache   = false;
+int           flightCount  = 0;
+int           flightIndex  = 0;
+int           countdown    = REFRESH_SECS;
+bool          isFetching   = false;
+bool          usingCache   = false;
 // Source: 0=proxy, 1=direct API, 2=cache
-int    dataSource   = 0;
+int           dataSource   = 0;
+unsigned long lastTick     = 0;
+unsigned long lastCycle    = 0;
 
 // ─── Session log (track unique callsigns to avoid duplicates) ─
 #define MAX_LOGGED 50
@@ -112,6 +133,12 @@ bool alreadyLogged(const char* cs) {
   for (int i = 0; i < loggedCount; i++)
     if (strcmp(loggedCallsigns[i], cs) == 0) return true;
   return false;
+}
+
+void applyLocation(int idx) {
+  HOME_LAT = LOC_PRESETS[idx].lat;
+  HOME_LON = LOC_PRESETS[idx].lon;
+  strlcpy(LOCATION_NAME, LOC_PRESETS[idx].name, sizeof(LOCATION_NAME));
 }
 
 // ─── Airline lookup ───────────────────────────────────
@@ -391,6 +418,52 @@ void logFlight(const Flight& f) {
   Serial.printf("Logged: %s\n", f.callsign);
 }
 
+// ─── Touch calibration (NVS flash) ───────────────────
+bool loadTouchCal() {
+  Preferences p;
+  p.begin("tracker", true);
+  if (!p.isKey("tcal")) { p.end(); return false; }
+  p.getBytes("tcal", touchCalData, sizeof(touchCalData));
+  p.end();
+  return true;
+}
+
+void saveTouchCal() {
+  Preferences p;
+  p.begin("tracker", false);
+  p.putBytes("tcal", touchCalData, sizeof(touchCalData));
+  p.end();
+}
+
+void initTouch() {
+  if (loadTouchCal()) {
+    tft.setTouch(touchCalData);
+    touchReady = true;
+    Serial.println("Touch cal loaded.");
+    return;
+  }
+  // First boot — run on-screen calibration routine
+  tft.fillScreen(C_BG);
+  tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+  tft.setTextColor(C_BG, C_AMBER);
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print("OVERHEAD TRACKER");
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setTextSize(2);
+  tft.setCursor(16, H/2 - 24);
+  tft.print("TOUCH CALIBRATION");
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setTextSize(1);
+  tft.setCursor(16, H/2 + 4);
+  tft.print("Tap each corner cross when it appears");
+  delay(1200);
+  tft.calibrateTouch(touchCalData, C_AMBER, C_BG, 15);
+  saveTouchCal();
+  touchReady = true;
+  Serial.println("Touch calibrated and saved.");
+}
+
 // ─── Drawing ──────────────────────────────────────────
 
 // ── Header bar ─────────────────────────────────────────
@@ -401,16 +474,27 @@ void drawHeader(bool fetching = false) {
   tft.setCursor(8, 6);
   tft.print("OVERHEAD TRACKER");
 
+  // ── Location toggle pill (centre of header, tappable) ──
+  char locLabel[24];
+  snprintf(locLabel, sizeof(locLabel), "< %s >", LOC_PRESETS[locIndex].name);
+  int locW    = strlen(locLabel) * 6 + 8;
+  int locPillX = (LOC_BTN_X1 + LOC_BTN_X2) / 2 - locW / 2;
+  tft.fillRect(LOC_BTN_X1, 4, LOC_BTN_X2 - LOC_BTN_X1, 20, C_DIMMER);
+  tft.setTextColor(C_AMBER, C_DIMMER);
+  tft.setTextSize(1);
+  tft.setCursor(locPillX, 10);
+  tft.print(locLabel);
+
+  // ── Source pill (right edge) ──
   const char* src = fetching      ? "UPDATING" :
                     dataSource==2 ? "CACHED"   :
                     dataSource==1 ? "DIRECT"   : "PROXY";
   tft.setTextSize(1);
   uint16_t pillBg = fetching ? C_RED : C_DIMMER;
-  uint16_t pillFg = fetching ? C_AMBER : C_AMBER;
   int tagW = strlen(src) * 6 + 8;
   int tagX = W - tagW - 6;
   tft.fillRect(tagX, 7, tagW, 14, pillBg);
-  tft.setTextColor(pillFg, pillBg);
+  tft.setTextColor(C_AMBER, pillBg);
   tft.setCursor(tagX + 4, 10);
   tft.print(src);
 }
@@ -434,6 +518,27 @@ void drawStatusBar() {
   tft.print(buf);
 }
 
+
+// ─── Touch handler ────────────────────────────────────
+void handleTouch(uint16_t tx, uint16_t ty) {
+  uint32_t now = millis();
+  if (now - lastTouchMs < TOUCH_DEBOUNCE_MS) return;
+  lastTouchMs = now;
+
+  // Location toggle — tap anywhere in the pill zone in the header
+  if (tx >= LOC_BTN_X1 && tx <= LOC_BTN_X2 && ty < HDR_H) {
+    locIndex = (locIndex + 1) % LOC_COUNT;
+    applyLocation(locIndex);
+    flightCount = 0;
+    flightIndex = 0;
+    Serial.printf("Location: %s (%.4f, %.4f)\n", LOCATION_NAME, HOME_LAT, HOME_LON);
+    if (!isFetching) {
+      fetchFlights();
+      countdown = REFRESH_SECS;
+      lastCycle  = millis();
+    }
+  }
+}
 
 // ─── Main Content Display (Redesigned) ─────────────────
 void renderFlight(const Flight& f) {
@@ -657,12 +762,7 @@ void bootSequence() {
 // ── Error / status message screen ──────────────────────
 void renderMessage(const char* line1, const char* line2 = nullptr) {
   tft.fillScreen(C_BG);
-  tft.fillRect(0, 0, W, HDR_H, C_AMBER);
-  tft.setTextColor(C_BG, C_AMBER);
-  tft.setTextSize(2);
-  tft.setCursor(8, 6);
-  tft.print("OVERHEAD TRACKER");
-
+  drawHeader(false);
   tft.setTextColor(C_AMBER, C_BG);
   tft.setTextSize(2);
   tft.setCursor(16, H/2 - 16);
@@ -978,6 +1078,8 @@ void setup() {
   } else {
     Serial.println("SD card not found — continuing without");
   }
+  applyLocation(locIndex);
+  initTouch();
 
   // ── Animated WiFi connection screen ──────────────────
   // Draws a scanning bar, dot progress, and attempt counter.
@@ -1111,10 +1213,16 @@ void setup() {
 }
 
 // ─── Loop ─────────────────────────────────────────────
-unsigned long lastTick  = 0;
-unsigned long lastCycle = 0;
 void loop() {
   unsigned long now = millis();
+
+  // ── Touch polling ──────────────────────────────────
+  if (touchReady) {
+    uint16_t tx, ty;
+    if (tft.getTouch(&tx, &ty)) {
+      handleTouch(tx, ty);
+    }
+  }
 
   if (now - lastTick >= 1000) {
     lastTick = now;
