@@ -269,6 +269,93 @@
     .dist-medium { color: var(--c-main); }
     .dist-far    { color: var(--c-dim); }
 
+    /* ── Aircraft silhouette ── */
+    #silhouette-wrap {
+      display: flex; align-items: center; gap: 10px;
+      margin: 6px 0 2px;
+      opacity: 0.75;
+    }
+    #silhouette-wrap svg {
+      filter: drop-shadow(0 0 4px var(--c-glow));
+      transition: transform 0.5s ease;
+      flex-shrink: 0;
+    }
+    #silhouette-label {
+      font-size: 0.65rem; opacity: 0.6; letter-spacing: 0.08em;
+    }
+
+    /* ── Interesting flight badge ── */
+    #interesting-badge {
+      display: none;
+      margin: 4px 0;
+      padding: 4px 8px;
+      border: 1px solid #ffee44;
+      background: rgba(255,238,68,0.07);
+      color: #ffee44;
+      text-shadow: 0 0 8px #ffcc00;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+    }
+    #interesting-badge.visible { display: block; }
+
+    /* ── Intercept timer ── */
+    #intercept-wrap {
+      margin: 4px 0 8px;
+      font-size: 0.72rem;
+      min-height: 1.2em;
+    }
+    #intercept-wrap .intercept-closing {
+      color: #ff9040; text-shadow: 0 0 8px #ff7000;
+    }
+    #intercept-wrap .intercept-overhead {
+      color: #60ff90; text-shadow: 0 0 8px #40dd70;
+    }
+    #intercept-wrap .intercept-receding {
+      color: var(--c-dim);
+    }
+
+    /* ── Keyboard help overlay ── */
+    #kbd-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(26,10,0,0.92);
+      z-index: 200;
+      align-items: center; justify-content: center;
+    }
+    #kbd-overlay.visible { display: flex; }
+    #kbd-panel {
+      border: 1px solid var(--c-main);
+      background: var(--c-bg);
+      padding: 20px 24px;
+      max-width: 340px; width: 90%;
+      box-shadow: 0 0 30px rgba(255,166,0,0.2);
+    }
+    #kbd-panel h3 {
+      margin: 0 0 14px;
+      font-size: 0.9rem;
+      letter-spacing: 0.1em;
+      border-bottom: 1px solid var(--c-dim);
+      padding-bottom: 8px;
+    }
+    .kbd-row {
+      display: flex; justify-content: space-between;
+      font-size: 0.75rem; margin: 6px 0;
+      opacity: 0.9;
+    }
+    .kbd-key {
+      background: rgba(255,166,0,0.12);
+      border: 1px solid var(--c-dim);
+      padding: 2px 7px;
+      font-size: 0.7rem;
+      letter-spacing: 0.05em;
+      min-width: 28px; text-align: center;
+    }
+    .kbd-desc { opacity: 0.7; text-align: right; }
+    #kbd-close {
+      margin-top: 16px; width: 100%;
+      font-size: 0.75rem; padding: 8px;
+    }
+
     /* Emergency squawk banner */
     #emerg-banner {
       display: none;
@@ -326,6 +413,14 @@
       <div id="alt-bar-wrap"><div id="alt-bar-fill" style="height:0%"></div></div>
       <div id="info">LOADING...</div>
     </div>
+
+    <!-- Aircraft silhouette + interesting flag -->
+    <div id="silhouette-wrap">
+      <svg id="silhouette-svg" width="64" height="40" viewBox="0 0 64 40"></svg>
+      <span id="silhouette-label"></span>
+    </div>
+    <div id="interesting-badge"></div>
+    <div id="intercept-wrap"></div>
     <div id="main-grid">
       <div class="data-item" data-tip="Barometric altitude above sea level.&#10;Red=below 1000ft  Yellow=1000–10000ft&#10;Amber=normal  Blue=above 35000ft"><span class="data-label">ALT</span><span class="data-value" id="d-alt">---</span></div>
       <div class="data-item" data-tip="Ground speed in knots.&#10;1 kt ≈ 1.85 km/h&#10;Dim=slow  Amber=normal  Blue=fast (500kt+)"><span class="data-label">SPEED</span><span class="data-value" id="d-spd">---</span></div>
@@ -353,6 +448,23 @@
       <button onclick="manualRefresh()" data-tip="Force a data refresh&#10;(auto-refreshes every 15s)">REFRESH</button>
       <button onclick="toggleSound()" id="sound-btn" data-tip="Toggle radar ping sound&#10;when a new closest aircraft&#10;is detected">🔇 SND</button>
       <button onclick="shareUrl()" data-tip="Copy a shareable link&#10;with your current location&#10;pre-filled">&#x2197; SHARE</button>
+      <button onclick="showKbdHelp()" data-tip="Show keyboard shortcuts">? HELP</button>
+    </div>
+
+    <!-- Keyboard shortcut overlay -->
+    <div id="kbd-overlay" onclick="hideKbdHelp()">
+      <div id="kbd-panel" onclick="event.stopPropagation()">
+        <h3>⌨ KEYBOARD SHORTCUTS</h3>
+        <div class="kbd-row"><span class="kbd-key">←</span><span class="kbd-desc">Previous aircraft</span></div>
+        <div class="kbd-row"><span class="kbd-key">→</span><span class="kbd-desc">Next aircraft</span></div>
+        <div class="kbd-row"><span class="kbd-key">Home</span><span class="kbd-desc">Jump to nearest</span></div>
+        <div class="kbd-row"><span class="kbd-key">R</span><span class="kbd-desc">Manual refresh</span></div>
+        <div class="kbd-row"><span class="kbd-key">S</span><span class="kbd-desc">Toggle sound</span></div>
+        <div class="kbd-row"><span class="kbd-key">?</span><span class="kbd-desc">Show / hide this help</span></div>
+        <div class="kbd-row"><span class="kbd-key">Esc</span><span class="kbd-desc">Close this panel</span></div>
+        <div class="kbd-row" style="margin-top:10px;opacity:0.45;font-size:0.65rem;justify-content:center;">Click outside or press Esc to close</div>
+        <button id="kbd-close" onclick="hideKbdHelp()">CLOSE</button>
+      </div>
     </div>
 
     <div id="footer-row">
@@ -939,6 +1051,209 @@
       }
     }
 
+    // ── Aircraft silhouette ──────────────────────────────────────────
+    // Returns SVG path data for a top-down silhouette by aircraft category/type.
+    // All paths designed to fit in a 64×40 viewBox.
+    function getSilhouetteSVG(typeCode, category) {
+      const t = (typeCode || '').toUpperCase();
+      const c = (category || '').toUpperCase();
+
+      // Helper: filled amber path
+      const path = (d, extra) => `<path fill="#ffa600" opacity="0.9" d="${d}" ${extra||''}/>`;
+
+      // HELICOPTER
+      if (c === 'A7' || ['EC35','EC45','S76','AS32','B06','B407','H60','R44','R22','EC30','EC55','AW13','AW16','AW19'].includes(t)) {
+        return path('M28,20 C28,16 30,14 32,14 C34,14 36,16 36,20 C36,24 34,26 32,26 C30,26 28,24 28,20 Z') + // body
+               path('M8,19 L28,20 L8,21 Z') + // tail boom
+               path('M5,15 L60,18 L60,22 L5,25 Z', 'opacity="0.5"') + // main rotor (blurred)
+               path('M4,18 L20,19 L20,21 L4,22 Z'); // tail rotor
+      }
+
+      // BUSINESS JET (Gulfstream, Falcon, Citation, Global)
+      if (['GL5T','GLEX','GLF6','GLF5','GLF4','FA7X','FA8X','C25A','C25B','C68A','E50P','LJ60','LJ75','C56X','C750','PRM1','E55P'].includes(t) ||
+          c === 'A6') {
+        return path('M24,20 L40,20 L52,22 L60,22 L58,20 L52,18 L40,20 Z') + // fuselage slim
+               path('M30,20 L36,12 L40,12 L38,20 Z') + // left wing swept
+               path('M30,20 L36,28 L40,28 L38,20 Z') + // right wing
+               path('M50,20 L54,16 L56,16 L55,20 Z') + // left tail
+               path('M50,20 L54,24 L56,24 L55,20 Z'); // right tail
+      }
+
+      // WIDEBODY (B747, B777, B787, A330, A340, A350, A380)
+      if (['B741','B742','B743','B744','B748','B77L','B772','B773','B77W','B778','B779',
+           'B788','B789','B78X','A332','A333','A338','A339','A342','A343','A345','A346',
+           'A359','A35K','A380','A388'].includes(t) || c === 'A5') {
+        return path('M20,20 L44,20 L58,21 L44,22 L20,20 Z') + // wide fuselage
+               path('M24,20 L18,11 L30,11 L38,20 Z') + // left wing big
+               path('M24,20 L18,29 L30,29 L38,20 Z') + // right wing big
+               path('M48,20 L46,15 L52,15 L52,20 Z') + // left htail
+               path('M48,20 L46,25 L52,25 L52,20 Z') + // right htail
+               path('M46,20 L44,14 L48,14 Z'); // vtail
+      }
+
+      // TURBOPROP / REGIONAL PROP
+      if (['DH8A','DH8B','DH8C','DH8D','AT43','AT45','AT72','AT75','AT76',
+           'SF34','SB20','JS41','PC12','C208','BE20','BE9L','PA31'].includes(t)) {
+        return path('M22,20 L42,20 L52,21 L42,22 L22,20 Z') + // fuselage
+               path('M26,20 L20,14 L28,14 L34,20 Z') + // left wing
+               path('M26,20 L20,26 L28,26 L34,20 Z') + // right wing
+               path('M20,19 L14,19 L14,21 L20,21 Z') + // prop left
+               path('M20,19 L18,17 L14,17 L14,19 Z') + // prop blade up
+               path('M20,21 L18,23 L14,23 L14,21 Z') + // prop blade down
+               path('M44,20 L42,16 L48,16 L48,20 Z') + // left htail small
+               path('M44,20 L42,24 L48,24 L48,20 Z'); // right htail small
+      }
+
+      // NARROWBODY default (A320 family, B737, B757, E-jets, CRJ)
+      return path('M22,20 L44,20 L56,21 L44,22 L22,20 Z') + // fuselage
+             path('M26,20 L20,13 L32,13 L36,20 Z') + // left wing
+             path('M26,20 L20,27 L32,27 L36,20 Z') + // right wing
+             path('M46,20 L44,16 L50,16 L50,20 Z') + // left htail
+             path('M46,20 L44,24 L50,24 L50,20 Z') + // right htail
+             path('M44,20 L42,14 L46,14 Z'); // vtail
+    }
+
+    function updateSilhouette(f) {
+      const svg   = document.getElementById('silhouette-svg');
+      const label = document.getElementById('silhouette-label');
+      const t = (f.t || '').toUpperCase();
+      const c = (f.category || '').toUpperCase();
+
+      // Silhouette category label
+      const SILO_LABELS = {
+        A7:'HELICOPTER', A5:'WIDEBODY', A6:'BIZJET / HIGH PERF',
+        A4:'MED-LARGE', A3:'LARGE', A2:'SMALL', A1:'LIGHT AIRCRAFT',
+        B1:'GLIDER', B2:'AIRSHIP', B6:'UAV',
+      };
+      let siloLabel = SILO_LABELS[c] || 'NARROWBODY';
+      // Override with more specific if known
+      if (['DH8A','DH8B','DH8C','DH8D','AT43','AT45','AT72','AT75','AT76',
+           'SF34','SB20','PC12','C208'].includes(t)) siloLabel = 'TURBOPROP';
+      if (['B741','B742','B743','B744','B748'].includes(t)) siloLabel = 'WIDEBODY (B747)';
+      if (['A380','A388'].includes(t)) siloLabel = 'WIDEBODY (A380)';
+
+      svg.innerHTML = getSilhouetteSVG(t, c);
+
+      // Rotate silhouette to match track heading (0° = pointing right = 90° heading)
+      const trackDeg = typeof f.track === 'number' ? f.track : 90;
+      // SVG aircraft points right (east). Rotate so it points in track direction.
+      svg.style.transform = `rotate(${trackDeg - 90}deg)`;
+
+      label.textContent = siloLabel;
+      document.getElementById('silhouette-wrap').style.display = 'flex';
+    }
+
+
+    // ── Interesting flight detection ─────────────────────────────────
+    // Flags aircraft that are unusual or noteworthy.
+    const MILITARY_PREFIXES = ['RCH','RRR','DUKE','VENUS','REACH','TOUGH','SWORD','IRON','STEEL',
+      'NAVY','ARMY','USAF','RNZAF','RAAF','KIWI','ARROW','TOPCAT'];
+    const MILITARY_TYPES = ['C130','C17','P8','E3CF','E3TF','E767','RC135','KC135','KC10',
+      'C5M','V22','C2A','E2C','F16','F18','F35','B52','B1B','B2'];
+
+    function detectInteresting(f) {
+      const flags = [];
+      const call  = (f.flight || '').trim().toUpperCase();
+      const t     = (f.t || '').toUpperCase();
+      const c     = (f.category || '').toUpperCase();
+      const gs    = typeof f.gs === 'number' ? f.gs : 0;
+      const alt   = typeof f.alt_baro === 'number' ? f.alt_baro : 0;
+
+      // Military callsign prefix
+      if (MILITARY_PREFIXES.some(p => call.startsWith(p))) flags.push('★ MILITARY CALLSIGN');
+      // Military aircraft type
+      if (MILITARY_TYPES.includes(t)) flags.push('★ MILITARY TYPE: ' + t);
+      // High performance / supersonic candidate
+      if (c === 'A6' || gs > 520) flags.push('★ HIGH SPEED: ' + Math.round(gs) + ' KT');
+      // Extremely high altitude
+      if (alt > 43000) flags.push('★ VERY HIGH ALT: FL' + String(Math.round(alt/100)).padStart(3,'0'));
+      // No callsign — anonymous aircraft
+      if (!call || call === '---') flags.push('★ NO CALLSIGN (ANON)');
+      // Private registration pattern (VH-Oxx = Qantas fleet, but VH-Xxx = private)
+      const reg = (f.r || '').toUpperCase();
+      if (reg && !call.match(/^[A-Z]{3}\d/)) flags.push('★ PRIVATE / CHARTER');
+      // Bizjet types
+      if (['GL5T','GLEX','GLF6','GLF5','GLF4','FA7X','FA8X','C25A','C25B','C56X','C750'].includes(t)) {
+        flags.push('★ BIZJET: ' + (AIRCRAFT_TYPE_DB[t] || t));
+        // Remove duplicate private flag if present
+        const idx = flags.indexOf('★ PRIVATE / CHARTER');
+        if (idx > -1) flags.splice(idx, 1);
+      }
+
+      return flags;
+    }
+
+    function updateInterestingBadge(f) {
+      const badge = document.getElementById('interesting-badge');
+      const flags = detectInteresting(f);
+      // Only show 2 most relevant flags to keep it tidy
+      if (flags.length) {
+        badge.innerHTML = flags.slice(0, 2).join('<br>');
+        badge.classList.add('visible');
+      } else {
+        badge.classList.remove('visible');
+      }
+    }
+
+
+    // ── Intercept timer ──────────────────────────────────────────────
+    // Calculates bearing from aircraft to location and compares with track
+    // to estimate if it's inbound, and how long until overhead.
+    function bearingTo(lat1, lon1, lat2, lon2) {
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const la1  = lat1 * Math.PI / 180;
+      const la2  = lat2 * Math.PI / 180;
+      const y = Math.sin(dLon) * Math.cos(la2);
+      const x = Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dLon);
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    function updateIntercept(f, distKm) {
+      const wrap = document.getElementById('intercept-wrap');
+      if (!f.track || !f.gs || f.gs < 30) {
+        wrap.innerHTML = '';
+        return;
+      }
+      // Bearing from aircraft TO the location
+      const bearingToLoc = bearingTo(f.lat, f.lon, locationLat, locationLon);
+      // Angular difference between where the aircraft is headed and where we are
+      let angleDiff = bearingToLoc - f.track;
+      if (angleDiff >  180) angleDiff -= 360;
+      if (angleDiff < -180) angleDiff += 360;
+
+      // Speed component closing toward location (cos of angle diff)
+      const closingKt   = f.gs * Math.cos(angleDiff * Math.PI / 180);
+      const closingKmh  = closingKt * 1.852;
+
+      if (Math.abs(angleDiff) < 70 && closingKmh > 20) {
+        // Inbound — calculate ETA
+        const hoursToOverhead = distKm / closingKmh;
+        const secsToOverhead  = Math.round(hoursToOverhead * 3600);
+        let etaStr;
+        if (secsToOverhead < 60)       etaStr = secsToOverhead + 'S';
+        else if (secsToOverhead < 3600) etaStr = Math.floor(secsToOverhead/60) + 'M ' + (secsToOverhead%60) + 'S';
+        else                            etaStr = Math.floor(secsToOverhead/3600) + 'H ' + Math.floor((secsToOverhead%3600)/60) + 'M';
+        wrap.innerHTML = '<span class="intercept-closing">⟶ INBOUND — OVERHEAD IN ~' + etaStr + '</span>';
+      } else if (distKm < 2) {
+        wrap.innerHTML = '<span class="intercept-overhead">◉ DIRECTLY OVERHEAD NOW</span>';
+      } else {
+        // Receding or crossing
+        const absAngle = Math.abs(angleDiff);
+        if (absAngle < 110) {
+          wrap.innerHTML = '<span class="intercept-closing">↗ CROSSING — CLOSEST IN ~' +
+            Math.round(distKm / (f.gs * 1.852 / 3600)) + 'S</span>';
+        } else {
+          wrap.innerHTML = '<span class="intercept-receding">↙ RECEDING</span>';
+        }
+      }
+    }
+
+
+    // ── Keyboard help overlay ────────────────────────────────────────
+    function showKbdHelp() { document.getElementById('kbd-overlay').classList.add('visible'); }
+    function hideKbdHelp() { document.getElementById('kbd-overlay').classList.remove('visible'); }
+
+
     // ── Render ───────────────────────────────────────────────────────
     // Formats and displays all data for one aircraft from the API.
     // Key API fields: flight, r (reg), t (type), hex, lat, lon,
@@ -1053,6 +1368,9 @@
       logFlight(f, phase);
       fetchPhoto(reg, f.hex || '', (f.t || '').toUpperCase());
       updateMap(f.lat, f.lon, call, f.gs, f.track);
+      updateSilhouette(f);
+      updateInterestingBadge(f);
+      updateIntercept(f, distLoc);
     }
 
 
@@ -1223,9 +1541,15 @@
     // ── Keyboard navigation ──────────────────────────────────────────
     // Arrow keys browse flights; suppressed while typing in the location input.
     document.addEventListener('keydown', e => {
-      if (document.activeElement === document.getElementById('location-input')) return;
-      if (e.key === 'ArrowRight') next();
-      if (e.key === 'ArrowLeft')  prev();
+      const typing = document.activeElement === document.getElementById('location-input');
+      if (typing) return;
+      if (e.key === 'ArrowRight') { next(); return; }
+      if (e.key === 'ArrowLeft')  { prev(); return; }
+      if (e.key === 'Home')       { go(0); return; }
+      if (e.key === 'r' || e.key === 'R') { manualRefresh(); return; }
+      if (e.key === 's' || e.key === 'S') { toggleSound(); return; }
+      if (e.key === '?')  { showKbdHelp(); return; }
+      if (e.key === 'Escape') { hideKbdHelp(); return; }
     });
     document.getElementById('location-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') setLocation();
