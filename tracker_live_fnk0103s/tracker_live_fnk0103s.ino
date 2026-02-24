@@ -1,0 +1,1135 @@
+/*
+  OVERHEAD TRACKER — LIVE (Redesigned UI)
+  FNK0103S — 4.0" 480x320 ST7796 (landscape)
+
+  Libraries needed:
+    - TFT_eSPI (Freenove pre-configured version)
+    - ArduinoJson (install via Library Manager)
+    - SD (built into Arduino ESP32 core — no install needed)
+*/
+
+#include <TFT_eSPI.h>
+#include <SPI.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <SD.h>
+#include <math.h>
+
+TFT_eSPI tft = TFT_eSPI();
+
+// ─── WiFi ─────────────────────────────────────────────
+const char* WIFI_SSID = "REDACTED";
+const char* WIFI_PASS = "REDACTED";
+
+// ─── Proxy ────────────────────────────────────────────
+const char* PROXY_HOST = "192.168.x.x";
+const int   PROXY_PORT = 3000;
+
+// ─── SD pin ───────────────────────────────────────────
+#define SD_CS 5
+
+// ─── Refresh ──────────────────────────────────────────
+const int REFRESH_SECS = 15;
+const int CYCLE_SECS   = 8;
+
+// ─── Screen (landscape: 480 wide x 320 tall) ──────────
+#define W 480
+#define H 320
+
+// ─── Layout ───────────────────────────────────────────
+#define HDR_H      28   // amber header bar
+#define FOOT_H     20   // dim footer bar
+#define CONTENT_Y  (HDR_H)
+#define CONTENT_H  (H - HDR_H - FOOT_H)   // 272px
+
+// ─── Colours (RGB565) ─────────────────────────────────
+#define C_BG      0x0820
+#define C_AMBER   0xFD00
+#define C_DIM     0x7940
+#define C_DIMMER  0x3900
+#define C_GREEN   0x07E0
+#define C_RED     0xF800
+#define C_CYAN    0x07FF
+#define C_YELLOW  0xFFE0
+
+// ─── Location (defaults — overridden by config.txt) ───
+float HOME_LAT    = REDACTEDf;
+float HOME_LON    = REDACTEDf;
+float GEOFENCE_KM = 10.0f;
+char  LOCATION_NAME[32] = "REDACTED";
+
+// ─── SD state ─────────────────────────────────────────
+bool sdAvailable = false;
+
+// ─── Flight status ────────────────────────────────────
+enum FlightStatus {
+  STATUS_UNKNOWN,
+  STATUS_TAKING_OFF,
+  STATUS_CLIMBING,
+  STATUS_CRUISING,
+  STATUS_DESCENDING,
+  STATUS_APPROACH,
+  STATUS_LANDING,
+  STATUS_OVERHEAD,
+};
+
+// ─── Flight struct ────────────────────────────────────
+struct Flight {
+  char         callsign[12];
+  char         reg[12];
+  char         type[8];
+  char         dep[6];
+  char         arr[6];
+  float        lat, lon;
+  int          alt;
+  int          speed;
+  int          vs;
+  int          track;
+  float        dist;
+  char         squawk[6];
+  FlightStatus status;
+};
+
+Flight flights[20];
+Flight newFlights[20];
+
+// global — keeps off the stack
+int    flightCount  = 0;
+int    flightIndex  = 0;
+int    countdown    = REFRESH_SECS;
+bool   isFetching   = false;
+bool   usingCache   = false;
+// Source: 0=proxy, 1=direct API, 2=cache
+int    dataSource   = 0;
+
+// ─── Session log (track unique callsigns to avoid duplicates) ─
+#define MAX_LOGGED 50
+char loggedCallsigns[MAX_LOGGED][12];
+int  loggedCount = 0;
+
+bool alreadyLogged(const char* cs) {
+  for (int i = 0; i < loggedCount; i++)
+    if (strcmp(loggedCallsigns[i], cs) == 0) return true;
+  return false;
+}
+
+// ─── Airline lookup ───────────────────────────────────
+struct Airline { const char* prefix; const char* name; };
+const Airline AIRLINES[] = {
+  {"QFA","QANTAS"},   {"VOZ","VIRGIN"},     {"JST","JETSTAR"},
+  {"RXA","REX"},      {"UAE","EMIRATES"},   {"ETD","ETIHAD"},
+  {"QTR","QATAR"},    {"SIA","SINGAPORE"},  {"ANZ","AIR NZ"},
+  {"CPA","CATHAY"},   {"MAS","MALAYSIA"},   {"THA","THAI"},
+  {"KAL","KOREAN"},   {"JAL","JAL"},        {"ANA","ANA"},
+  {"AAL","AMERICAN"}, {"UAL","UNITED"},     {"BAW","BRITISH"},
+  {"DAL","DELTA"},    {"AFR","AIR FRANCE"}, {"DLH","LUFTHANSA"},
+  {"NWL","NETWORK"},  {"FJI","FIJI"},       {"EVA","EVA AIR"},
+  {"CCA","AIR CHINA"},{"CSN","CHINA STH"},  {"CES","CHINA EST"},
+  {"HAL","HAWAIIAN"},
+};
+const int AIRLINE_COUNT = sizeof(AIRLINES) / sizeof(AIRLINES[0]);
+
+const char* getAirline(const char* cs) {
+  for (int i = 0; i < AIRLINE_COUNT; i++)
+    if (strncmp(cs, AIRLINES[i].prefix, 3) == 0) return AIRLINES[i].name;
+  return "";
+}
+
+// ─── Aircraft type lookup ─────────────────────────────
+struct AircraftType { const char* code; const char* name; };
+const AircraftType AIRCRAFT_TYPES[] = {
+  {"B737","B737-700"},  {"B738","B737-800"},  {"B739","B737-900"},  {"B73X","B737-900ER"},
+  {"B37M","B737 MAX 7"},{"B38M","B737 MAX 8"},{"B39M","B737 MAX 9"},{"B3XM","B737 MAX 10"},
+  {"B752","B757-200"},  {"B753","B757-300"},
+  {"B762","B767-200"},  {"B763","B767-300"},  {"B764","B767-400"},
+  {"B772","B777-200"},  {"B77L","B777-200LR"},{"B773","B777-300"},  {"B77W","B777-300ER"},
+  {"B788","B787-8"},    {"B789","B787-9"},    {"B78X","B787-10"},
+  {"B712","B717-200"},
+  {"B741","B747-100"},  {"B742","B747-200"},  {"B743","B747-300"},  {"B744","B747-400"},  {"B748","B747-8"},
+  {"A318","A318"},      {"A319","A319"},      {"A320","A320"},      {"A321","A321"},
+  {"A19N","A319neo"},   {"A20N","A320neo"},   {"A21N","A321neo"},   {"A21X","A321XLR"},
+  {"A332","A330-200"},  {"A333","A330-300"},  {"A338","A330-800neo"},{"A339","A330-900neo"},
+  {"A342","A340-200"},  {"A343","A340-300"},  {"A345","A340-500"},  {"A346","A340-600"},
+  {"A359","A350-900"},  {"A35K","A350-1000"},
+  {"A380","A380"},      {"A388","A380-800"},
+  {"E170","E170"},      {"E175","E175"},      {"E190","E190"},      {"E195","E195"},
+  {"E290","E190-E2"},   {"E295","E195-E2"},
+  {"CRJ2","CRJ-200"},   {"CRJ7","CRJ-700"},   {"CRJ9","CRJ-900"},   {"CRJX","CRJ-1000"},
+  {"DH8A","Dash 8-100"},{"DH8B","Dash 8-200"},{"DH8C","Dash 8-300"},{"DH8D","Dash 8-400"},
+  {"AT43","ATR 42-300"},{"AT45","ATR 42-500"},{"AT72","ATR 72-200"},{"AT75","ATR 72-500"},{"AT76","ATR 72-600"},
+  {"BCS1","A220-100"},  {"BCS3","A220-300"},
+  {"SF34","SAAB 340"},  {"SB20","SAAB 2000"}, {"JS41","Jetstream 41"},
+  {"PC12","Pilatus PC-12"},{"C208","Cessna Caravan"},
+  {"GL5T","G550"},      {"GLEX","Global Express"},{"GLF6","G650"},
+  {"C25A","Citation CJ2"},{"C25B","Citation CJ3"},
+  {"FA7X","Falcon 7X"}, {"FA8X","Falcon 8X"},
+  {"C130","C-130 Hercules"},{"P8","P-8 Poseidon"},
+  {"EC35","H135"},      {"EC45","H145"},       {"S76","Sikorsky S-76"},
+  {"B06","Bell 206"},   {"B407","Bell 407"},
+};
+const int AIRCRAFT_TYPE_COUNT = sizeof(AIRCRAFT_TYPES) / sizeof(AIRCRAFT_TYPES[0]);
+
+const char* getAircraftTypeName(const char* code) {
+  if (!code || !code[0]) return "---";
+  for (int i = 0; i < AIRCRAFT_TYPE_COUNT; i++)
+    if (strcmp(AIRCRAFT_TYPES[i].code, code) == 0) return AIRCRAFT_TYPES[i].name;
+  return code; 
+}
+
+// ─── Airport name lookup ──────────────────────────────
+struct Airport { const char* code; const char* city; };
+const Airport AIRPORTS[] = {
+  {"YSSY","Sydney"},   {"YMML","Melbourne"}, {"YBBN","Brisbane"},
+  {"YPPH","Perth"},    {"YPAD","Adelaide"},  {"YSCB","Canberra"},
+  {"YBCS","Cairns"},   {"YBHM","Hamilton Is"},{"YBTL","Townsville"},
+  {"YBAS","Alice Spg"},{"YSNF","Norfolk Is"},
+  {"SYD","Sydney"},    {"MEL","Melbourne"},  {"BNE","Brisbane"},
+  {"PER","Perth"},     {"ADL","Adelaide"},   {"CBR","Canberra"},
+  {"CNS","Cairns"},    {"OOL","Gold Coast"}, {"TSV","Townsville"},
+  {"DRW","Darwin"},    {"HBA","Hobart"},     {"LST","Launceston"},
+  {"MKY","Mackay"},    {"ROK","Rockhampton"},
+  {"NZAA","Auckland"}, {"NZCH","Christchurch"},{"NZWN","Wellington"},{"NZQN","Queenstown"},
+  {"AKL","Auckland"},  {"CHC","Christchurch"},{"WLG","Wellington"},  {"ZQN","Queenstown"},
+  {"WSSS","Singapore"},{"SIN","Singapore"},
+  {"VHHH","Hong Kong"},{"HKG","Hong Kong"},
+  {"RJAA","Tokyo"},    {"RJTT","Tokyo"},     {"NRT","Tokyo"},       {"HND","Tokyo"},
+  {"RJBB","Osaka"},    {"KIX","Osaka"},
+  {"RKSI","Seoul"},    {"ICN","Seoul"},
+  {"RCTP","Taipei"},   {"TPE","Taipei"},
+  {"VTBS","Bangkok"},  {"BKK","Bangkok"},
+  {"WMKK","K.Lumpur"}, {"KUL","K.Lumpur"},
+  {"WADD","Bali"},     {"WIII","Jakarta"},   {"DPS","Bali"},        {"CGK","Jakarta"},
+  {"RPLL","Manila"},   {"MNL","Manila"},
+  {"VVTS","Ho Chi Minh"},{"SGN","Ho Chi Minh"},{"VVNB","Hanoi"},   {"HAN","Hanoi"},
+  {"ZBAA","Beijing"},  {"ZSPD","Shanghai"},  {"PEK","Beijing"},     {"PVG","Shanghai"},
+  {"ZGGG","Guangzhou"},{"CAN","Guangzhou"},
+  {"OMDB","Dubai"},    {"DXB","Dubai"},
+  {"OMAA","Abu Dhabi"},{"AUH","Abu Dhabi"},
+  {"OTHH","Doha"},    {"DOH","Doha"},
+  {"VIDP","Delhi"},    {"VABB","Mumbai"},    {"DEL","Delhi"},       {"BOM","Mumbai"},
+  {"EGLL","London"},   {"EGKK","London"},   {"LHR","London"},      {"LGW","London"},
+  {"LFPG","Paris"},    {"CDG","Paris"},
+  {"EHAM","Amsterdam"},{"AMS","Amsterdam"},
+  {"EDDF","Frankfurt"},{"FRA","Frankfurt"},
+  {"EDDM","Munich"},   {"MUC","Munich"},
+  {"LEMD","Madrid"},   {"MAD","Madrid"},
+  {"LEBL","Barcelona"},{"BCN","Barcelona"},
+  {"LIRF","Rome"},     {"FCO","Rome"},
+  {"LTFM","Istanbul"}, {"IST","Istanbul"},
+  {"KJFK","New York"}, {"JFK","New York"},
+  {"KLAX","L.A."},     {"LAX","L.A."},
+  {"KSFO","S.F."},     {"SFO","S.F."},
+  {"KORD","Chicago"},  {"ORD","Chicago"},
+  {"KATL","Atlanta"},  {"ATL","Atlanta"},
+  {"KDFW","Dallas"},   {"DFW","Dallas"},
+  {"KDEN","Denver"},   {"DEN","Denver"},
+  {"KSEA","Seattle"},  {"SEA","Seattle"},
+  {"CYYZ","Toronto"},  {"YYZ","Toronto"},
+  {"CYVR","Vancouver"},{"YVR","Vancouver"},
+  {"FAOR","J'burg"},  {"JNB","J'burg"},
+  {"FACT","Cape Town"},{"CPT","Cape Town"},
+  {"HECA","Cairo"},    {"CAI","Cairo"},
+};
+const int AIRPORT_COUNT = sizeof(AIRPORTS) / sizeof(AIRPORTS[0]);
+
+const char* airportCity(const char* code) {
+  if (!code || !code[0]) return nullptr;
+  for (int i = 0; i < AIRPORT_COUNT; i++)
+    if (strcmp(AIRPORTS[i].code, code) == 0) return AIRPORTS[i].city;
+  return code;
+}
+
+bool formatRoute(const char* dep, const char* arr, char* buf, int len) {
+  if (!dep[0] && !arr[0]) return false;
+  const char* depName = dep[0] ? airportCity(dep) : "?";
+  const char* arrName = arr[0] ? airportCity(arr) : "?";
+  snprintf(buf, len, "%s > %s", depName, arrName);
+  return true;
+}
+
+// ─── Flight status derivation ─────────────────────────
+FlightStatus deriveStatus(int alt, int vs, float dist) {
+  if (alt <= 0) return STATUS_UNKNOWN;
+  if (dist < 2.0f && alt < 8000) return STATUS_OVERHEAD;
+  if (alt < 1000)  return (vs > 200) ? STATUS_TAKING_OFF : STATUS_LANDING;
+  if (alt < 5000 && vs >  800) return STATUS_TAKING_OFF;
+  if (alt < 4000 && vs < -300) return STATUS_APPROACH;
+  if (alt < 6000 && vs < -500) return STATUS_APPROACH;
+  if (vs >  400) return STATUS_CLIMBING;
+  if (vs < -400) return STATUS_DESCENDING;
+  return STATUS_CRUISING;
+}
+
+const char* statusLabel(FlightStatus s) {
+  switch (s) {
+    case STATUS_TAKING_OFF:  return "TAKING OFF";
+    case STATUS_CLIMBING:    return "CLIMBING";
+    case STATUS_CRUISING:    return "CRUISING";
+    case STATUS_DESCENDING:  return "DESCENDING";
+    case STATUS_APPROACH:    return "ON APPROACH";
+    case STATUS_LANDING:     return "LANDING";
+    case STATUS_OVERHEAD:    return "OVERHEAD";
+    default:                 return "UNKNOWN";
+  }
+}
+
+uint16_t statusColor(FlightStatus s) {
+  switch (s) {
+    case STATUS_TAKING_OFF:  return C_GREEN;
+    case STATUS_CLIMBING:    return C_GREEN;
+    case STATUS_CRUISING:    return C_AMBER;
+    case STATUS_DESCENDING:  return C_CYAN;
+    case STATUS_APPROACH:    return C_YELLOW;
+    case STATUS_LANDING:     return C_RED;
+    case STATUS_OVERHEAD:    return C_AMBER;
+    default:                 return C_DIM;
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────
+float haversineKm(float lat1, float lon1, float lat2, float lon2) {
+  const float R = 6371.0f;
+  float dLat = (lat2 - lat1) * M_PI / 180.0f;
+  float dLon = (lon2 - lon1) * M_PI / 180.0f;
+  float a = sinf(dLat/2)*sinf(dLat/2) +
+            cosf(lat1*M_PI/180)*cosf(lat2*M_PI/180)*sinf(dLon/2)*sinf(dLon/2);
+  return R * 2.0f * atan2f(sqrtf(a), sqrtf(1-a));
+}
+
+int apiRadiusNm() {
+  return (int)ceilf((GEOFENCE_KM / 1.852f) * 4.0f);
+}
+
+void formatAlt(int alt, char* buf, int len) {
+  if (alt <= 0)          snprintf(buf, len, "---");
+  else if (alt >= 10000) snprintf(buf, len, "FL%03d", alt / 100);
+  else                   snprintf(buf, len, "%d FT", alt);
+}
+
+// ─── SD: Config ───────────────────────────────────────
+void loadConfig() {
+  if (!sdAvailable) return;
+  File f = SD.open("/config.txt", FILE_READ);
+  if (!f) {
+    Serial.println("No config.txt — using defaults");
+    return;
+  }
+  Serial.println("Reading config.txt...");
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.startsWith("#") || line.length() == 0) continue;
+    int eq = line.indexOf('=');
+    if (eq < 0) continue;
+    String key = line.substring(0, eq);
+    String val = line.substring(eq + 1);
+    key.trim(); val.trim();
+    if      (key == "lat")      HOME_LAT    = val.toFloat();
+    else if (key == "lon")      HOME_LON    = val.toFloat();
+    else if (key == "geofence") GEOFENCE_KM = val.toFloat();
+    else if (key == "name") {
+      val.toUpperCase();
+      strlcpy(LOCATION_NAME, val.c_str(), sizeof(LOCATION_NAME));
+    }
+    Serial.printf("  %s = %s\n", key.c_str(), val.c_str());
+  }
+  f.close();
+  Serial.println("Config loaded.");
+}
+
+// ─── SD: Cache write ──────────────────────────────────
+void writeCache(const String& payload) {
+  if (!sdAvailable) return;
+  File f = SD.open("/cache.json", FILE_WRITE);
+  if (!f) { Serial.println("Cache write failed"); return; }
+  f.print(payload);
+  f.close();
+  Serial.printf("Cache written (%d bytes)\n", payload.length());
+}
+
+// ─── SD: Cache read ───────────────────────────────────
+String readCache() {
+  if (!sdAvailable) return "";
+  File f = SD.open("/cache.json", FILE_READ);
+  if (!f) return "";
+  String payload = f.readString();
+  f.close();
+  Serial.printf("Cache loaded (%d bytes)\n", payload.length());
+  return payload;
+}
+
+// ─── SD: Flight log ───────────────────────────────────
+void logFlight(const Flight& f) {
+  if (!sdAvailable) return;
+  if (!f.callsign[0] || alreadyLogged(f.callsign)) return;
+  bool isNew = !SD.exists("/flightlog.csv");
+  File file = SD.open("/flightlog.csv", FILE_APPEND);
+  if (!file) return;
+
+  if (isNew) {
+    file.println("callsign,reg,type,airline,dep,arr,status,dist_km");
+  }
+
+  char row[96];
+  snprintf(row, sizeof(row), "%s,%s,%s,%s,%s,%s,%s,%.1f",
+    f.callsign,
+    f.reg,
+    f.type,
+    getAirline(f.callsign),
+    f.dep[0] ? f.dep : "",
+    f.arr[0] ? f.arr : "",
+    statusLabel(f.status),
+    f.dist
+  );
+  file.println(row);
+  file.close();
+
+  if (loggedCount < MAX_LOGGED) {
+    strlcpy(loggedCallsigns[loggedCount++], f.callsign, 12);
+  }
+  Serial.printf("Logged: %s\n", f.callsign);
+}
+
+// ─── Drawing ──────────────────────────────────────────
+
+// ── Header bar ─────────────────────────────────────────
+void drawHeader(bool fetching = false) {
+  tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+  tft.setTextColor(C_BG, C_AMBER);
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print("OVERHEAD TRACKER");
+
+  const char* src = fetching      ? "UPDATING" :
+                    dataSource==2 ? "CACHED"   :
+                    dataSource==1 ? "DIRECT"   : "PROXY";
+  tft.setTextSize(1);
+  uint16_t pillBg = fetching ? C_RED : C_DIMMER;
+  uint16_t pillFg = fetching ? C_AMBER : C_AMBER;
+  int tagW = strlen(src) * 6 + 8;
+  int tagX = W - tagW - 6;
+  tft.fillRect(tagX, 7, tagW, 14, pillBg);
+  tft.setTextColor(pillFg, pillBg);
+  tft.setCursor(tagX + 4, 10);
+  tft.print(src);
+}
+
+// ── Footer bar ─────────────────────────────────────────
+void drawStatusBar() {
+  int y = H - FOOT_H;
+  tft.fillRect(0, y, W, FOOT_H, C_BG);
+  tft.drawFastHLine(0, y, W, C_DIMMER);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setTextSize(1);
+  char buf[80];
+  if (isFetching) {
+    snprintf(buf, sizeof(buf), "  SCANNING AIRSPACE...");
+  } else {
+    const char* src = dataSource==2 ? "CACHE" : dataSource==1 ? "DIRECT" : "PROXY";
+    snprintf(buf, sizeof(buf), "  AC %d/%d   SRC:%s   NEXT:%ds",
+             flightIndex+1, flightCount, src, countdown);
+  }
+  tft.setCursor(6, y + 6);
+  tft.print(buf);
+}
+
+
+// ─── Main Content Display (Redesigned) ─────────────────
+void renderFlight(const Flight& f) {
+  drawHeader(isFetching);
+  
+  // Clear the main content area once to prevent flickering
+  tft.fillRect(0, CONTENT_Y, W, CONTENT_H, C_BG);
+  
+  int x = 15;
+  int y = CONTENT_Y + 10;
+
+  // 1. PRIMARY IDENTITY (Flight & Airline)
+  tft.setTextSize(4);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(x, y);
+  tft.print(f.callsign[0] ? f.callsign : "SEARCHING");
+  
+  y += 32;
+  const char* al = getAirline(f.callsign);
+  tft.setTextSize(2);
+  tft.setTextColor(al[0] ? C_AMBER : C_DIM, C_BG);
+  tft.setCursor(x, y);
+  tft.print(al[0] ? al : "UNKNOWN AIRLINE");
+
+  // 2. AIRCRAFT TYPE & REG
+  y += 30;
+  tft.drawFastHLine(10, y, W - 20, C_DIMMER);
+  y += 10;
+  
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(x, y);
+  tft.print("AIRCRAFT TYPE");
+  tft.setCursor(W/2 + 20, y);
+  tft.print("REGISTRATION");
+  
+  y += 10;
+  tft.setTextSize(2);
+  tft.setTextColor(C_CYAN, C_BG);
+  tft.setCursor(x, y);
+  tft.print(getAircraftTypeName(f.type));
+  
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(W/2 + 20, y);
+  tft.print(f.reg[0] ? f.reg : "---");
+
+  // 3. ROUTE SECTION
+  y += 28;
+  tft.drawFastHLine(10, y, W - 20, C_DIMMER);
+  y += 10;
+  
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(x, y);
+  tft.print("ROUTE");
+  
+  y += 10;
+  char routeBuf[64];
+  tft.setTextSize(3);
+  tft.setTextColor(C_YELLOW, C_BG);
+  tft.setCursor(x, y);
+  if (formatRoute(f.dep, f.arr, routeBuf, sizeof(routeBuf))) {
+    tft.print(routeBuf);
+  } else {
+    tft.setTextColor(C_DIMMER, C_BG);
+    tft.print("NO ROUTE DATA");
+  }
+
+  // 4. PHASE, ALTITUDE & SPEED (Footer Dashboard)
+  int dashY = H - FOOT_H - 85;
+  tft.drawFastHLine(0, dashY, W, C_DIM);
+  
+  // Phase Block
+  uint16_t sCol = statusColor(f.status);
+  tft.fillRect(0, dashY + 1, 4, 84, sCol); // Status color accent
+  
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(12, dashY + 10);
+  tft.print("PHASE");
+  
+  tft.setTextSize(2);
+  tft.setTextColor(sCol, C_BG);
+  tft.setCursor(12, dashY + 28);
+  tft.print(statusLabel(f.status));
+  
+  // Squawk
+  bool emerg = strcmp(f.squawk,"7700")==0 || strcmp(f.squawk,"7600")==0 || strcmp(f.squawk,"7500")==0;
+  const char* sqLabel = strcmp(f.squawk,"7700")==0 ? "MAYDAY" : strcmp(f.squawk,"7600")==0 ? "NORDO" : strcmp(f.squawk,"7500")==0 ? "HIJACK" : f.squawk;
+  tft.setTextColor(emerg ? C_RED : C_DIM, C_BG);
+  tft.setTextSize(1);
+  tft.setCursor(12, dashY + 52);
+  tft.print("SQK ");
+  tft.print(sqLabel);
+
+  // Altitude Block
+  char altBuf[20];
+  formatAlt(f.alt, altBuf, sizeof(altBuf));
+  tft.drawFastVLine(W/3, dashY + 5, 75, C_DIMMER);
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(W/3 + 12, dashY + 10);
+  tft.print("ALTITUDE");
+  tft.setTextSize(3);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(W/3 + 12, dashY + 30);
+  tft.print(altBuf);
+
+  // Speed Block
+  tft.drawFastVLine((W/3)*2, dashY + 5, 75, C_DIMMER);
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor((W/3)*2 + 12, dashY + 10);
+  tft.print("SPEED");
+  tft.setTextSize(3);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor((W/3)*2 + 12, dashY + 30);
+  
+  if (f.speed > 0) {
+    char spdBuf[16];
+    snprintf(spdBuf, sizeof(spdBuf), "%d", f.speed);
+    tft.print(spdBuf);
+    tft.setTextSize(1);
+    tft.print(" KT");
+  } else {
+    tft.print("---");
+  }
+
+  drawStatusBar();
+}
+
+
+// ── Boot sequence ───────────────────────────────────────
+static int bootLineY = 56;
+
+void bootLine(const char* label, const char* result, uint16_t col, int pauseMs) {
+  tft.setTextColor(C_DIMMER, C_BG);
+  tft.setTextSize(1);
+  tft.setCursor(10, bootLineY);
+  tft.print(label);
+  int dotX = 10 + strlen(label) * 6;
+  while (dotX < 212) { tft.setCursor(dotX, bootLineY); tft.print("."); dotX += 6; }
+  delay(pauseMs);
+  tft.setTextColor(col, C_BG);
+  tft.setCursor(214, bootLineY);
+  tft.print(result);
+  bootLineY += 14;
+  delay(35);
+}
+
+void bootSequence() {
+  tft.fillScreen(C_BG);
+  bootLineY = 56;
+  for (int y = 0; y < H; y += 2) {
+    tft.drawFastHLine(0, y, W, C_DIMMER);
+    delayMicroseconds(500);
+  }
+  delay(80);
+  tft.fillScreen(C_BG);
+  delay(50);
+
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setTextSize(2);
+  tft.setCursor(10, 12);
+  tft.print("OVERHEAD TRACKER");
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setTextSize(1);
+  tft.setCursor(10, 34);
+  tft.print("ADS-B AIRSPACE SURVEILLANCE  REV 3.2");
+  tft.drawFastHLine(0, 47, W, C_DIM);
+  delay(250);
+  char buf[40];
+  snprintf(buf, sizeof(buf), "240 MHz  DUAL CORE");
+  bootLine("CPU",            buf,                    C_GREEN,  90);
+  snprintf(buf, sizeof(buf), "%d KB FREE", ESP.getFreeHeap() / 1024);
+  bootLine("HEAP MEMORY",    buf,                    C_GREEN,  110);
+  snprintf(buf, sizeof(buf), "%d KB",      ESP.getFlashChipSize() / 1024);
+  bootLine("FLASH SIZE",     buf,                    C_AMBER,  80);
+  snprintf(buf, sizeof(buf), "%s", ESP.getSdkVersion());
+  bootLine("ESP-IDF SDK",    buf,                    C_DIM,    70);
+  bootLine("SPI BUS",        "CLK 40MHz  OK",         C_GREEN,  80);
+  bootLine("DISPLAY",        "ST7796 480x320 16BIT",  C_GREEN,  90);
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+  bootLine("WIFI MAC",       buf,                    C_AMBER,  100);
+  bootLine("WIFI MODE",      "STA  802.11 B/G/N",    C_AMBER,  70);
+  bootLine("SD CARD",        "SEARCHING...",         C_YELLOW, 280);
+  snprintf(buf, sizeof(buf), "%s:%d", PROXY_HOST, PROXY_PORT);
+  bootLine("PROXY TARGET",   buf,                    C_AMBER,  80);
+  snprintf(buf, sizeof(buf), "%.4f, %.4f", HOME_LAT, HOME_LON);
+  bootLine("HOME COORDS",    buf,                    C_AMBER,  90);
+  snprintf(buf, sizeof(buf), "%.0f KM RADIUS", GEOFENCE_KM);
+  bootLine("GEOFENCE",       buf,                    C_AMBER,  70);
+  bootLine("ADS-B PIPELINE", "DECODER READY",        C_GREEN,  120);
+  snprintf(buf, sizeof(buf), "%d SEC AUTO-REFRESH", REFRESH_SECS);
+  bootLine("POLL INTERVAL",  buf,                    C_GREEN,  80);
+  tft.drawFastHLine(0, bootLineY + 4, W, C_DIM);
+  int flashY = bootLineY + 8;
+
+  for (int i = 0; i < 3; i++) {
+    tft.fillRect(8, flashY, W - 16, 24, C_GREEN);
+    tft.setTextColor(C_BG, C_GREEN);
+    tft.setTextSize(2);
+    int textX = (W - 13*12) / 2;
+    tft.setCursor(textX, flashY + 4);
+    tft.print("SYSTEM ONLINE");
+    delay(170);
+    tft.fillRect(8, flashY, W - 16, 24, C_BG);
+    delay(110);
+  }
+  tft.fillRect(8, flashY, W - 16, 24, C_GREEN);
+  tft.setTextColor(C_BG, C_GREEN);
+  tft.setTextSize(2);
+  tft.setCursor((W - 13*12) / 2, flashY + 4);
+  tft.print("SYSTEM ONLINE");
+  delay(800);
+}
+
+// ── Error / status message screen ──────────────────────
+void renderMessage(const char* line1, const char* line2 = nullptr) {
+  tft.fillScreen(C_BG);
+  tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+  tft.setTextColor(C_BG, C_AMBER);
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print("OVERHEAD TRACKER");
+
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setTextSize(2);
+  tft.setCursor(16, H/2 - 16);
+  tft.print(line1);
+  if (line2) {
+    tft.setTextColor(C_DIM, C_BG);
+    tft.setTextSize(1);
+    tft.setCursor(16, H/2 + 12);
+    tft.print(line2);
+  }
+}
+
+// ─── Parse a String payload (proxy or cache) ──────────
+int extractFlights(DynamicJsonDocument& doc);
+int parsePayload(const String& payload) {
+  StaticJsonDocument<300> filter;
+  JsonObject af = filter["ac"].createNestedObject();
+  af["flight"] = af["r"] = af["t"] = af["lat"] = af["lon"] =
+  af["alt_baro"] = af["gs"] = af["baro_rate"] = af["track"] =
+  af["squawk"] = af["dep"] = af["arr"] = true;
+  Serial.printf("[MEM] Before JSON alloc: %d free\n", ESP.getFreeHeap());
+  DynamicJsonDocument doc(32768);
+  DeserializationError err = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+  Serial.printf("[MEM] After JSON parse: %d free\n", ESP.getFreeHeap());
+  if (err) {
+    Serial.printf("JSON parse error: %s\n", err.c_str());
+    return -1;
+  }
+  return extractFlights(doc);
+}
+
+// ─── Fetch: proxy (returns small String) ──────────────
+String fetchFromProxy() {
+  char url[160];
+  snprintf(url, sizeof(url),
+    "http://%s:%d/flights?lat=%.4f&lon=%.4f&radius=%d",
+    PROXY_HOST, PROXY_PORT, HOME_LAT, HOME_LON, apiRadiusNm());
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(5000);
+  int code = http.GET();
+  if (code == 200) {
+    String p = http.getString();
+    http.end();
+    Serial.printf("Proxy OK, payload=%d bytes\n", p.length());
+    return p;
+  }
+  http.end();
+  Serial.printf("Proxy failed (%d)\n", code);
+  return "";
+}
+
+// ─── Fetch: direct API — zero-allocation stream scanner ──
+static bool readQuotedString(WiFiClient* s, char* buf, int maxLen) {
+  int i = 0;
+  int c;
+  while ((c = s->read()) != -1) {
+    if (c == '"') { buf[i] = 0; return true; }
+    if (c == '\\') s->read();  
+    if (i < maxLen - 1) buf[i++] = (char)c;
+  }
+  return false;
+}
+
+static int readNumber(WiFiClient* s, char* buf, int maxLen) {
+  int i = 0;
+  int c = s->peek();
+  while (c == ' ' || c == '\n' || c == '\r') { s->read(); c = s->peek(); }
+  while (i < maxLen - 1) {
+    c = s->peek();
+    if (c == -1 || c == ',' || c == '}' || c == ']' || c == ' ') break;
+    buf[i++] = (char)s->read();
+  }
+  buf[i] = 0;
+  return i;
+}
+
+int fetchAndParseDirectAPI() {
+  char url[160];
+  snprintf(url, sizeof(url),
+    "https://api.airplanes.live/v2/point/%.4f/%.4f/%d",
+    HOME_LAT, HOME_LON, apiRadiusNm());
+
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(12000);
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    Serial.printf("Direct API failed (%d)\n", code);
+    return -1;
+  }
+
+  Serial.printf("[MEM] Direct stream scan start: %d free\n", ESP.getFreeHeap());
+
+  WiFiClient* s = http.getStreamPtr();
+  int newCount = 0;
+  int depth = 0;          
+  bool inString = false;
+  char key[16] = "";
+  char val[32] = "";
+  bool readingKey = false;
+  bool readingVal = false;
+  char ac_callsign[12]={}, ac_reg[12]={}, ac_type[8]={};
+  char ac_dep[6]={},       ac_arr[6]={},  ac_squawk[6]={};
+  float ac_lat=0, ac_lon=0;
+  int   ac_alt=0, ac_speed=0, ac_vs=0, ac_track=-1;
+
+  auto commitAircraft = [&]() {
+    if (newCount >= 20) return;
+    if (ac_alt < 500 || ac_lat == 0.0f) return;
+    float dist = haversineKm(HOME_LAT, HOME_LON, ac_lat, ac_lon);
+    if (dist > GEOFENCE_KM) return;
+    Flight& f = newFlights[newCount];
+    strlcpy(f.callsign, ac_callsign, sizeof(f.callsign));
+    for (int i = strlen(f.callsign)-1; i >= 0 && f.callsign[i] == ' '; i--) f.callsign[i] = 0;
+    strlcpy(f.reg,    ac_reg,    sizeof(f.reg));
+    strlcpy(f.type,   ac_type,   sizeof(f.type));
+    strlcpy(f.squawk, ac_squawk[0] ? ac_squawk : "----", sizeof(f.squawk));
+    strlcpy(f.dep,    ac_dep,    sizeof(f.dep));
+    strlcpy(f.arr,    ac_arr,    sizeof(f.arr));
+    f.lat=ac_lat; f.lon=ac_lon; f.alt=ac_alt;
+    f.speed=ac_speed; f.vs=ac_vs; f.track=ac_track; f.dist=dist;
+    f.status = deriveStatus(ac_alt, ac_vs, dist);
+    for (int i=0;f.callsign[i];i++) f.callsign[i]=toupper(f.callsign[i]);
+    for (int i=0;f.reg[i];i++)      f.reg[i]=toupper(f.reg[i]);
+    for (int i=0;f.type[i];i++)     f.type[i]=toupper(f.type[i]);
+    for (int i=0;f.dep[i];i++)      f.dep[i]=toupper(f.dep[i]);
+    for (int i=0;f.arr[i];i++)      f.arr[i]=toupper(f.arr[i]);
+    newCount++;
+  };
+  auto applyKV = [&]() {
+    if      (strcmp(key,"flight")==0)    strlcpy(ac_callsign, val, sizeof(ac_callsign));
+    else if (strcmp(key,"r")==0)         strlcpy(ac_reg,      val, sizeof(ac_reg));
+    else if (strcmp(key,"t")==0)         strlcpy(ac_type,     val, sizeof(ac_type));
+    else if (strcmp(key,"squawk")==0)    strlcpy(ac_squawk,   val, sizeof(ac_squawk));
+    else if (strcmp(key,"dep")==0)       strlcpy(ac_dep,      val, sizeof(ac_dep));
+    else if (strcmp(key,"arr")==0)       strlcpy(ac_arr,      val, sizeof(ac_arr));
+    else if (strcmp(key,"lat")==0)       ac_lat   = atof(val);
+    else if (strcmp(key,"lon")==0)       ac_lon   = atof(val);
+    else if (strcmp(key,"alt_baro")==0)  ac_alt   = atoi(val);
+    else if (strcmp(key,"gs")==0)        ac_speed = (int)atof(val);
+    else if (strcmp(key,"baro_rate")==0) ac_vs    = atoi(val);
+    else if (strcmp(key,"track")==0)     ac_track = (int)atof(val);
+    key[0] = 0; val[0] = 0;
+  };
+
+  unsigned long deadline = millis() + 12000;
+  int c;
+  while (millis() < deadline) {
+    if (!s->available()) { delay(5); continue; }
+    c = s->read();
+    if (c == -1) break;
+    if (c == '"' && depth == 2) {
+      readQuotedString(s, key, sizeof(key));
+      while (s->available() && s->peek() != ':' && s->peek() != '"') s->read();
+      if (s->peek() == ':') s->read();
+      while (s->available() && (s->peek()==' '||s->peek()=='\t')) s->read();
+      int nxt = s->peek();
+      if (nxt == '"') {
+        s->read();  
+        readQuotedString(s, val, sizeof(val));
+        applyKV();
+      } else if (nxt == '-' || (nxt >= '0' && nxt <= '9')) {
+        readNumber(s, val, sizeof(val));
+        applyKV();
+      }
+      key[0] = 0;
+      continue;
+    }
+
+    if (c == '{') {
+      depth++;
+      if (depth == 2) {
+        ac_callsign[0]=ac_reg[0]=ac_type[0]=0;
+        ac_dep[0]=ac_arr[0]=ac_squawk[0]=0;
+        ac_lat=ac_lon=0; ac_alt=ac_speed=ac_vs=0; ac_track=-1;
+      }
+    } else if (c == '}') {
+       if (depth == 2) commitAircraft();
+      if (depth > 0) depth--;
+    }
+  }
+
+  http.end();
+  Serial.printf("[MEM] Direct scan done: %d free, found %d\n", ESP.getFreeHeap(), newCount);
+
+  for (int i = 0; i < newCount-1; i++)
+    for (int j = 0; j < newCount-i-1; j++)
+      if (newFlights[j].dist > newFlights[j+1].dist)
+        { Flight tmp=newFlights[j]; newFlights[j]=newFlights[j+1]; newFlights[j+1]=tmp; }
+
+  return newCount;
+}
+
+// ─── Extract flights from a parsed JSON doc ────────────
+int extractFlights(DynamicJsonDocument& doc) {
+  JsonArray ac = doc["ac"].as<JsonArray>();
+  int newCount = 0;
+  for (JsonObject a : ac) {
+    if (newCount >= 20) break;
+    float lat = a["lat"] | 0.0f;
+    float lon = a["lon"] | 0.0f;
+    int   alt = a["alt_baro"] | 0;
+    if (alt < 500 || lat == 0.0f) continue;
+    float dist = haversineKm(HOME_LAT, HOME_LON, lat, lon);
+    if (dist > GEOFENCE_KM) continue;
+
+    Flight& f = newFlights[newCount];
+    const char* cs = a["flight"] | "";
+    strlcpy(f.callsign, cs, sizeof(f.callsign));
+    for (int i = strlen(f.callsign)-1; i >= 0 && f.callsign[i] == ' '; i--) f.callsign[i] = 0;
+    strlcpy(f.reg,    a["r"]      | "",     sizeof(f.reg));
+    strlcpy(f.type,   a["t"]      | "",     sizeof(f.type));
+    strlcpy(f.squawk, a["squawk"] | "----", sizeof(f.squawk));
+    strlcpy(f.dep,    a["dep"]    | "",     sizeof(f.dep));
+    strlcpy(f.arr,    a["arr"]    | "",     sizeof(f.arr));
+    f.lat   = lat;
+    f.lon = lon; f.alt = alt;
+    f.speed = (int)(a["gs"]      | 0.0f);
+    f.vs    = a["baro_rate"]     | 0;
+    f.track = (int)(a["track"]   | -1.0f);
+    f.dist  = dist;
+    f.status = deriveStatus(alt, f.vs, dist);
+
+    for (int i = 0; f.callsign[i]; i++) f.callsign[i] = toupper(f.callsign[i]);
+    for (int i = 0; f.reg[i]; i++)      f.reg[i]      = toupper(f.reg[i]);
+    for (int i = 0; f.type[i]; i++)     f.type[i]     = toupper(f.type[i]);
+    for (int i = 0; f.dep[i]; i++)      f.dep[i]      = toupper(f.dep[i]);
+    for (int i = 0; f.arr[i]; i++)      f.arr[i]      = toupper(f.arr[i]);
+    newCount++;
+  }
+
+  for (int i = 0; i < newCount-1; i++)
+    for (int j = 0; j < newCount-i-1; j++)
+      if (newFlights[j].dist > newFlights[j+1].dist)
+        { Flight tmp = newFlights[j]; newFlights[j] = newFlights[j+1]; newFlights[j+1] = tmp; }
+
+  return newCount;
+}
+
+// ─── Main fetch ───────────────────────────────────────
+void fetchFlights() {
+  Serial.printf("[MEM] fetchFlights start: %d bytes free\n", ESP.getFreeHeap());
+  isFetching = true;
+  if (flightCount > 0) {
+    drawHeader(true);
+    drawStatusBar();
+  } else {
+    renderMessage("FETCHING...");
+  }
+
+  int newCount = 0;
+  bool fromCache = false;
+  String payload = fetchFromProxy();
+  if (!payload.isEmpty()) {
+    writeCache(payload);
+    newCount = parsePayload(payload);
+    payload = String();  
+    dataSource = 0;
+  } else {
+    Serial.println("Trying direct API (stream)...");
+    newCount = fetchAndParseDirectAPI();
+    if (newCount >= 0) dataSource = 1;
+
+    if (newCount < 0) {
+      Serial.println("Direct API failed, loading SD cache...");
+      payload = readCache();
+      if (!payload.isEmpty()) {
+        newCount = parsePayload(payload);
+        payload = String();
+        fromCache = true;
+        dataSource = 2;  
+        Serial.println("Using cached data.");
+      } else {
+        renderMessage("NO DATA", "ALL SOURCES FAILED");
+        isFetching = false;
+        return;
+      }
+    }
+  }
+
+  if (newCount < 0) {
+    renderMessage("JSON ERROR", fromCache ? "CACHE CORRUPT" : "BAD RESPONSE");
+    isFetching = false;
+    return;
+  }
+
+  memcpy(flights, newFlights, sizeof(Flight) * newCount);
+  flightCount = newCount;
+  flightIndex = 0;
+  isFetching  = false;
+  usingCache  = fromCache;
+
+  for (int i = 0; i < flightCount; i++) logFlight(flights[i]);
+  if (flightCount == 0) renderMessage("NO AIRCRAFT", "IN RANGE");
+  else                  renderFlight(flights[0]);
+}
+
+// ─── Setup ────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+  tft.init();
+  tft.setRotation(1);
+  tft.fillScreen(C_BG);
+  tft.setTextWrap(false);
+
+  bootSequence();
+  if (SD.begin(SD_CS)) {
+    sdAvailable = true;
+    Serial.println("SD card ready");
+    loadConfig();
+  } else {
+    Serial.println("SD card not found — continuing without");
+  }
+
+  // ── Animated WiFi connection screen ──────────────────
+  // Draws a scanning bar, dot progress, and attempt counter.
+  // Everything is drawn inside the wait loop so it animates live.
+
+  // Draw the static parts once
+  tft.fillScreen(C_BG);
+  tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+  tft.setTextColor(C_BG, C_AMBER);
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print("OVERHEAD TRACKER");
+
+  // Title
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setTextSize(2);
+  tft.setCursor(16, 60);
+  tft.print("CONNECTING TO WIFI");
+
+  // SSID
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setTextSize(1);
+  tft.setCursor(16, 88);
+  tft.print("NETWORK: ");
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.print(WIFI_SSID);
+
+  // Static bar track (empty bar outline)
+  const int BAR_X = 16;
+  const int BAR_Y = 120;
+  const int BAR_W = W - 32;
+  const int BAR_H = 6;
+  tft.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, C_DIMMER);
+
+  // Dot row area — 20 dots across, one per attempt
+  const int DOT_Y   = 148;
+  const int DOT_SPACING = (BAR_W) / 20;
+
+  // Attempt counter label
+  tft.setTextColor(C_DIMMER, C_BG);
+  tft.setTextSize(1);
+  tft.setCursor(16, 174);
+  tft.print("ATTEMPTING...");
+
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  int attempts = 0;
+
+  // Scanning bar position — animates left-to-right and back (ping-pong)
+  int scanPos   = 0;
+  int scanDir   = 1;
+  const int SCAN_W = 48;  // width of the lit segment
+
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
+
+    // ── Erase old scan segment ──
+    tft.fillRect(BAR_X + 1, BAR_Y + 1, BAR_W - 2, BAR_H - 2, C_BG);
+
+    // ── Draw new scan segment ──
+    int segX = BAR_X + 1 + scanPos;
+    int segMaxW = BAR_W - 2 - scanPos;
+    int segW = min(SCAN_W, segMaxW);
+    if (segW > 0) tft.fillRect(segX, BAR_Y + 1, segW, BAR_H - 2, C_AMBER);
+
+    // Advance ping-pong
+    scanPos += scanDir * 4;
+    if (scanPos + SCAN_W >= BAR_W - 2) { scanPos = BAR_W - 2 - SCAN_W; scanDir = -1; }
+    if (scanPos <= 0)                   { scanPos = 0;                   scanDir =  1; }
+
+    // ── Dot progress (one dot per attempt, max 20) ──
+    int dotIdx = attempts % 20;
+    int dotX   = BAR_X + dotIdx * DOT_SPACING + DOT_SPACING / 2;
+    // Reset row if we wrap
+    if (dotIdx == 0 && attempts > 0) {
+      tft.fillRect(BAR_X, DOT_Y, BAR_W, 8, C_BG);
+    }
+    tft.fillCircle(dotX, DOT_Y + 4, 2, C_DIM);
+
+    // ── Attempt counter ──
+    char countBuf[24];
+    snprintf(countBuf, sizeof(countBuf), "ATTEMPT %d / 40", attempts + 1);
+    tft.fillRect(16, 174, 200, 10, C_BG);
+    tft.setTextColor(C_DIMMER, C_BG);
+    tft.setTextSize(1);
+    tft.setCursor(16, 174);
+    tft.print(countBuf);
+
+    delay(500);
+    attempts++;
+  }
+
+  // ── Connection result flash ───────────────────────────
+  if (WiFi.status() == WL_CONNECTED) {
+    // Fill the scan bar solid green and show CONNECTED
+    tft.fillRect(BAR_X + 1, BAR_Y + 1, BAR_W - 2, BAR_H - 2, C_GREEN);
+    tft.fillRect(16, 174, W - 32, 10, C_BG);
+    tft.setTextColor(C_GREEN, C_BG);
+    tft.setTextSize(1);
+    tft.setCursor(16, 174);
+    tft.print("CONNECTED");
+    // Flash the whole bar 3x
+    for (int i = 0; i < 3; i++) {
+      tft.fillRect(BAR_X + 1, BAR_Y + 1, BAR_W - 2, BAR_H - 2, C_BG);
+      delay(100);
+      tft.fillRect(BAR_X + 1, BAR_Y + 1, BAR_W - 2, BAR_H - 2, C_GREEN);
+      delay(120);
+    }
+    delay(300);
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi failed, attempting cache...");
+    String cached = readCache();
+    if (!cached.isEmpty()) {
+      int n = parsePayload(cached);
+      if (n > 0) {
+        memcpy(flights, newFlights, sizeof(Flight) * n);
+        flightCount = n;
+        usingCache  = true;
+        dataSource  = 2;
+        renderFlight(flights[0]);
+        countdown = REFRESH_SECS;
+        return;
+      }
+    }
+    renderMessage("WIFI FAILED", "CHECK CREDENTIALS");
+    while (true) delay(1000);
+  }
+
+  fetchFlights();
+  countdown = REFRESH_SECS;
+}
+
+// ─── Loop ─────────────────────────────────────────────
+unsigned long lastTick  = 0;
+unsigned long lastCycle = 0;
+void loop() {
+  unsigned long now = millis();
+
+  if (now - lastTick >= 1000) {
+    lastTick = now;
+    countdown--;
+    if (flightCount > 0) drawStatusBar();
+    if (countdown <= 0) {
+      fetchFlights();
+      countdown = REFRESH_SECS;
+      lastCycle = millis();
+    }
+  }
+
+  if (flightCount > 1 && now - lastCycle >= (unsigned long)CYCLE_SECS * 1000) {
+    lastCycle = now;
+    flightIndex = (flightIndex + 1) % flightCount;
+    renderFlight(flights[flightIndex]);
+  }
+}
