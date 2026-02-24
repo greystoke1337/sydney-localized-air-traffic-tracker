@@ -90,7 +90,34 @@
       box-shadow: 0 0 6px var(--c-glow);
     }
 
-    #info { font-size: clamp(1rem, 4vw, 1.3rem); line-height: 1.7; padding-right: 14px; }
+    /* ── Info block — structured rows for clean alignment ── */
+    #info { font-size: clamp(0.85rem, 2.5vw, 0.95rem); padding-right: 14px; }
+    .info-row {
+      display: flex;
+      align-items: baseline;
+      line-height: 1.75;
+    }
+    .info-label {
+      flex: 0 0 6.5em;           /* fixed column width — all values start here */
+      font-size: 0.72em;
+      opacity: 0.45;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+    .info-value {
+      flex: 1;
+      word-break: break-word;
+    }
+    .info-family {
+      color: var(--c-dim);
+      font-size: 0.88em;
+      opacity: 0.8;
+    }
+    .info-route {
+      color: #a0d8ef;
+      text-shadow: 0 0 6px #6090b0 !important;
+    }
+
     #main { line-height: 1.8; margin-bottom: 12px; font-size: clamp(0.72rem, 2vw, 0.78rem); opacity: 0.85; }
 
     /* Buttons — equal-width flex row that wraps on narrow screens */
@@ -186,15 +213,23 @@
     #main-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0 12px;
+      gap: 2px 16px;
       margin-bottom: 12px;
       font-size: clamp(0.72rem, 2vw, 0.78rem);
-      opacity: 0.85;
-      line-height: 1.8;
+      line-height: 1.9;
     }
     #main-grid .data-item { display: flex; flex-direction: column; }
-    #main-grid .data-label { font-size: 0.6rem; opacity: 0.6; letter-spacing: 0.05em; }
-    #main-grid .data-value { font-size: 0.82rem; }
+    #main-grid .data-label {
+      font-size: 0.6rem;
+      opacity: 0.45;
+      letter-spacing: 0.06em;
+      text-shadow: none !important;  /* labels need no glow — keeps them crisp */
+    }
+    /* Shared: crisp single-shadow for all data values */
+    #main-grid .data-value {
+      font-size: 0.82rem;
+      text-shadow: 0 0 4px var(--c-glow) !important;
+    }
 
     /* ── Hover tooltips ── */
     [data-tip] {
@@ -248,41 +283,26 @@
 
     /* ── Colour-coded data values ── */
     /* Altitude bands */
-    .alt-ground  { color: #ff6060; text-shadow: 0 0 8px #ff4040 !important; }
-    .alt-low     { color: #ffcc40; text-shadow: 0 0 8px #ffaa00 !important; }
-    .alt-mid     { color: var(--c-main); }
-    .alt-high    { color: #60e8ff; text-shadow: 0 0 8px #40c8ff !important; }
-    .alt-vhigh   { color: #a0a0ff; text-shadow: 0 0 8px #8080ff !important; }
+    .alt-ground  { color: #ff6060; text-shadow: 0 0 6px #ff4040 !important; }
+    .alt-low     { color: #ffcc40; text-shadow: 0 0 6px #ffaa00 !important; }
+    .alt-mid     { color: var(--c-main); text-shadow: 0 0 4px var(--c-glow) !important; }
+    .alt-high    { color: #60e8ff; text-shadow: 0 0 6px #40c8ff !important; }
+    .alt-vhigh   { color: #a0a0ff; text-shadow: 0 0 6px #8080ff !important; }
 
     /* Vertical speed */
-    .vs-climbing   { color: #60ff90; text-shadow: 0 0 8px #40dd70 !important; }
-    .vs-descending { color: #ff6060; text-shadow: 0 0 8px #ff4040 !important; }
-    .vs-level      { color: var(--c-main); }
+    .vs-climbing   { color: #60ff90; text-shadow: 0 0 6px #40dd70 !important; }
+    .vs-descending { color: #ff6060; text-shadow: 0 0 6px #ff4040 !important; }
+    .vs-level      { color: var(--c-main); text-shadow: 0 0 4px var(--c-glow) !important; }
 
     /* Speed bands */
-    .spd-slow   { color: var(--c-dim); }
-    .spd-normal { color: var(--c-main); }
-    .spd-fast   { color: #60e8ff; text-shadow: 0 0 8px #40c8ff !important; }
+    .spd-slow   { color: var(--c-dim); text-shadow: 0 0 3px var(--c-dim) !important; }
+    .spd-normal { color: var(--c-main); text-shadow: 0 0 4px var(--c-glow) !important; }
+    .spd-fast   { color: #60e8ff; text-shadow: 0 0 6px #40c8ff !important; }
 
     /* Distance proximity */
-    .dist-close  { color: #ff9040; text-shadow: 0 0 8px #ff7000 !important; }
-    .dist-medium { color: var(--c-main); }
-    .dist-far    { color: var(--c-dim); }
-
-    /* ── Aircraft silhouette ── */
-    #silhouette-wrap {
-      display: flex; align-items: center; gap: 10px;
-      margin: 6px 0 2px;
-      opacity: 0.75;
-    }
-    #silhouette-wrap svg {
-      filter: drop-shadow(0 0 4px var(--c-glow));
-      transition: transform 0.5s ease;
-      flex-shrink: 0;
-    }
-    #silhouette-label {
-      font-size: 0.65rem; opacity: 0.6; letter-spacing: 0.08em;
-    }
+    .dist-close  { color: #ff9040; text-shadow: 0 0 6px #ff7000 !important; }
+    .dist-medium { color: var(--c-main); text-shadow: 0 0 4px var(--c-glow) !important; }
+    .dist-far    { color: var(--c-dim); text-shadow: 0 0 3px var(--c-dim) !important; }
 
     /* ── Interesting flight badge ── */
     #interesting-badge {
@@ -414,11 +434,6 @@
       <div id="info">LOADING...</div>
     </div>
 
-    <!-- Aircraft silhouette + interesting flag -->
-    <div id="silhouette-wrap">
-      <svg id="silhouette-svg" width="64" height="40" viewBox="0 0 64 40"></svg>
-      <span id="silhouette-label"></span>
-    </div>
     <div id="interesting-badge"></div>
     <div id="intercept-wrap"></div>
     <div id="main-grid">
@@ -621,19 +636,70 @@
       B06:'BELL 206', B407:'BELL 407',
     };
 
+    // ICAO type code → aircraft family (manufacturer + programme)
+    const AIRCRAFT_FAMILY_DB = {
+      // Boeing narrowbody
+      B737:'BOEING 737', B738:'BOEING 737', B739:'BOEING 737', B73X:'BOEING 737',
+      B37M:'BOEING 737 MAX', B38M:'BOEING 737 MAX', B39M:'BOEING 737 MAX', B3XM:'BOEING 737 MAX',
+      B752:'BOEING 757', B753:'BOEING 757',
+      B762:'BOEING 767', B763:'BOEING 767', B764:'BOEING 767',
+      // Boeing widebody
+      B772:'BOEING 777', B77L:'BOEING 777', B773:'BOEING 777', B77W:'BOEING 777',
+      B778:'BOEING 777X', B779:'BOEING 777X',
+      B788:'BOEING 787', B789:'BOEING 787', B78X:'BOEING 787',
+      B741:'BOEING 747', B742:'BOEING 747', B743:'BOEING 747', B744:'BOEING 747', B748:'BOEING 747',
+      B712:'BOEING 717', B721:'BOEING 727', B722:'BOEING 727',
+      // Airbus narrowbody
+      A318:'AIRBUS A320 FAMILY', A319:'AIRBUS A320 FAMILY', A320:'AIRBUS A320 FAMILY', A321:'AIRBUS A320 FAMILY',
+      A19N:'AIRBUS A320neo FAMILY', A20N:'AIRBUS A320neo FAMILY', A21N:'AIRBUS A320neo FAMILY', A21X:'AIRBUS A320neo FAMILY',
+      BCS1:'AIRBUS A220', BCS3:'AIRBUS A220',
+      // Airbus widebody
+      A332:'AIRBUS A330', A333:'AIRBUS A330', A338:'AIRBUS A330neo', A339:'AIRBUS A330neo',
+      A342:'AIRBUS A340', A343:'AIRBUS A340', A345:'AIRBUS A340', A346:'AIRBUS A340',
+      A359:'AIRBUS A350', A35K:'AIRBUS A350',
+      A380:'AIRBUS A380', A388:'AIRBUS A380',
+      // Embraer
+      E170:'EMBRAER E-JET', E175:'EMBRAER E-JET', E190:'EMBRAER E-JET', E195:'EMBRAER E-JET',
+      E75L:'EMBRAER E2', E290:'EMBRAER E2', E295:'EMBRAER E2',
+      // Bombardier regional
+      CRJ2:'BOMBARDIER CRJ', CRJ7:'BOMBARDIER CRJ', CRJ9:'BOMBARDIER CRJ', CRJX:'BOMBARDIER CRJ',
+      // Turboprops
+      DH8A:'DE HAVILLAND DASH 8', DH8B:'DE HAVILLAND DASH 8', DH8C:'DE HAVILLAND DASH 8', DH8D:'DE HAVILLAND DASH 8',
+      AT43:'ATR', AT45:'ATR', AT72:'ATR', AT75:'ATR', AT76:'ATR',
+      SF34:'SAAB', SB20:'SAAB',
+      PC12:'PILATUS', C208:'CESSNA',
+      // Business jets
+      GL5T:'GULFSTREAM', GLEX:'BOMBARDIER GLOBAL', GLF6:'GULFSTREAM',
+      C25A:'CESSNA CITATION', C25B:'CESSNA CITATION', C68A:'CESSNA CITATION',
+      FA7X:'DASSAULT FALCON', FA8X:'DASSAULT FALCON',
+      // Military
+      C130:'LOCKHEED MARTIN', C17:'BOEING MILITARY', P8:'BOEING MILITARY',
+      // Helicopters
+      EC35:'AIRBUS HELICOPTERS', EC45:'AIRBUS HELICOPTERS',
+      S76:'SIKORSKY', AS32:'AIRBUS HELICOPTERS',
+      B06:'BELL', B407:'BELL',
+    };
+
+    function aircraftFamily(typeCode) {
+      return AIRCRAFT_FAMILY_DB[(typeCode || '').toUpperCase()] || null;
+    }
+
     // Combines type code + emitter category into one readable string.
-    // e.g. type="B789", category="A5" → "B787-9 (HEAVY)"
+    // Returns { type: string, family: string|null }
+    // e.g. type="B789", category="A5" → { type: "B787-9 (HEAVY)", family: "BOEING 787" }
     function formatType(t, category) {
       const typeCode = (t || '').toUpperCase();
       const cat      = (category || '').toUpperCase();
       const fullName = AIRCRAFT_TYPE_DB[typeCode];
       const catLabel = CATEGORY_DB[cat];
-      if (fullName && catLabel) return fullName + ' (' + catLabel + ')';
-      if (fullName)             return fullName;
-      if (typeCode && catLabel) return typeCode + ' (' + catLabel + ')';
-      if (typeCode)             return typeCode;
-      if (catLabel)             return catLabel;
-      return cat || '---';
+      let typeStr;
+      if (fullName && catLabel) typeStr = fullName + ' (' + catLabel + ')';
+      else if (fullName)        typeStr = fullName;
+      else if (typeCode && catLabel) typeStr = typeCode + ' (' + catLabel + ')';
+      else if (typeCode)        typeStr = typeCode;
+      else if (catLabel)        typeStr = catLabel;
+      else                      typeStr = cat || '---';
+      return typeStr;
     }
 
 
@@ -1019,8 +1085,8 @@
     function updateRouteDisplay(routeStr) {
       const info = document.getElementById('info');
       // Remove any existing route line, then append
-      info.innerHTML = info.innerHTML.replace(/<br><span[^>]*>ROUTE<\/span>.*$/s, '');
-      if (routeStr) info.innerHTML += '<br><span style="opacity:0.45;font-size:0.85em;">ROUTE</span>&nbsp;&nbsp;&nbsp; <span style="color:#a0d8ef;text-shadow:0 0 6px #6090b0;">' + routeStr + '</span>';
+      info.innerHTML = info.innerHTML.replace(/<div class="info-row"><span class="info-label">ROUTE<\/span>.*?<\/div>/s, '');
+      if (routeStr) info.innerHTML += '<div class="info-row"><span class="info-label">ROUTE  </span><span class="info-value info-route">' + routeStr + '</span></div>';
     }
 
     // Looks up route by callsign from adsbdb.com, falls back gracefully.
@@ -1050,99 +1116,6 @@
         return null;
       }
     }
-
-    // ── Aircraft silhouette ──────────────────────────────────────────
-    // Returns SVG path data for a top-down silhouette by aircraft category/type.
-    // All paths designed to fit in a 64×40 viewBox.
-    function getSilhouetteSVG(typeCode, category) {
-      const t = (typeCode || '').toUpperCase();
-      const c = (category || '').toUpperCase();
-
-      // Helper: filled amber path
-      const path = (d, extra) => `<path fill="#ffa600" opacity="0.9" d="${d}" ${extra||''}/>`;
-
-      // HELICOPTER
-      if (c === 'A7' || ['EC35','EC45','S76','AS32','B06','B407','H60','R44','R22','EC30','EC55','AW13','AW16','AW19'].includes(t)) {
-        return path('M28,20 C28,16 30,14 32,14 C34,14 36,16 36,20 C36,24 34,26 32,26 C30,26 28,24 28,20 Z') + // body
-               path('M8,19 L28,20 L8,21 Z') + // tail boom
-               path('M5,15 L60,18 L60,22 L5,25 Z', 'opacity="0.5"') + // main rotor (blurred)
-               path('M4,18 L20,19 L20,21 L4,22 Z'); // tail rotor
-      }
-
-      // BUSINESS JET (Gulfstream, Falcon, Citation, Global)
-      if (['GL5T','GLEX','GLF6','GLF5','GLF4','FA7X','FA8X','C25A','C25B','C68A','E50P','LJ60','LJ75','C56X','C750','PRM1','E55P'].includes(t) ||
-          c === 'A6') {
-        return path('M24,20 L40,20 L52,22 L60,22 L58,20 L52,18 L40,20 Z') + // fuselage slim
-               path('M30,20 L36,12 L40,12 L38,20 Z') + // left wing swept
-               path('M30,20 L36,28 L40,28 L38,20 Z') + // right wing
-               path('M50,20 L54,16 L56,16 L55,20 Z') + // left tail
-               path('M50,20 L54,24 L56,24 L55,20 Z'); // right tail
-      }
-
-      // WIDEBODY (B747, B777, B787, A330, A340, A350, A380)
-      if (['B741','B742','B743','B744','B748','B77L','B772','B773','B77W','B778','B779',
-           'B788','B789','B78X','A332','A333','A338','A339','A342','A343','A345','A346',
-           'A359','A35K','A380','A388'].includes(t) || c === 'A5') {
-        return path('M20,20 L44,20 L58,21 L44,22 L20,20 Z') + // wide fuselage
-               path('M24,20 L18,11 L30,11 L38,20 Z') + // left wing big
-               path('M24,20 L18,29 L30,29 L38,20 Z') + // right wing big
-               path('M48,20 L46,15 L52,15 L52,20 Z') + // left htail
-               path('M48,20 L46,25 L52,25 L52,20 Z') + // right htail
-               path('M46,20 L44,14 L48,14 Z'); // vtail
-      }
-
-      // TURBOPROP / REGIONAL PROP
-      if (['DH8A','DH8B','DH8C','DH8D','AT43','AT45','AT72','AT75','AT76',
-           'SF34','SB20','JS41','PC12','C208','BE20','BE9L','PA31'].includes(t)) {
-        return path('M22,20 L42,20 L52,21 L42,22 L22,20 Z') + // fuselage
-               path('M26,20 L20,14 L28,14 L34,20 Z') + // left wing
-               path('M26,20 L20,26 L28,26 L34,20 Z') + // right wing
-               path('M20,19 L14,19 L14,21 L20,21 Z') + // prop left
-               path('M20,19 L18,17 L14,17 L14,19 Z') + // prop blade up
-               path('M20,21 L18,23 L14,23 L14,21 Z') + // prop blade down
-               path('M44,20 L42,16 L48,16 L48,20 Z') + // left htail small
-               path('M44,20 L42,24 L48,24 L48,20 Z'); // right htail small
-      }
-
-      // NARROWBODY default (A320 family, B737, B757, E-jets, CRJ)
-      return path('M22,20 L44,20 L56,21 L44,22 L22,20 Z') + // fuselage
-             path('M26,20 L20,13 L32,13 L36,20 Z') + // left wing
-             path('M26,20 L20,27 L32,27 L36,20 Z') + // right wing
-             path('M46,20 L44,16 L50,16 L50,20 Z') + // left htail
-             path('M46,20 L44,24 L50,24 L50,20 Z') + // right htail
-             path('M44,20 L42,14 L46,14 Z'); // vtail
-    }
-
-    function updateSilhouette(f) {
-      const svg   = document.getElementById('silhouette-svg');
-      const label = document.getElementById('silhouette-label');
-      const t = (f.t || '').toUpperCase();
-      const c = (f.category || '').toUpperCase();
-
-      // Silhouette category label
-      const SILO_LABELS = {
-        A7:'HELICOPTER', A5:'WIDEBODY', A6:'BIZJET / HIGH PERF',
-        A4:'MED-LARGE', A3:'LARGE', A2:'SMALL', A1:'LIGHT AIRCRAFT',
-        B1:'GLIDER', B2:'AIRSHIP', B6:'UAV',
-      };
-      let siloLabel = SILO_LABELS[c] || 'NARROWBODY';
-      // Override with more specific if known
-      if (['DH8A','DH8B','DH8C','DH8D','AT43','AT45','AT72','AT75','AT76',
-           'SF34','SB20','PC12','C208'].includes(t)) siloLabel = 'TURBOPROP';
-      if (['B741','B742','B743','B744','B748'].includes(t)) siloLabel = 'WIDEBODY (B747)';
-      if (['A380','A388'].includes(t)) siloLabel = 'WIDEBODY (A380)';
-
-      svg.innerHTML = getSilhouetteSVG(t, c);
-
-      // Rotate silhouette to match track heading (0° = pointing right = 90° heading)
-      const trackDeg = typeof f.track === 'number' ? f.track : 90;
-      // SVG aircraft points right (east). Rotate so it points in track direction.
-      svg.style.transform = `rotate(${trackDeg - 90}deg)`;
-
-      label.textContent = siloLabel;
-      document.getElementById('silhouette-wrap').style.display = 'flex';
-    }
-
 
     // ── Interesting flight detection ─────────────────────────────────
     // Flags aircraft that are unusual or noteworthy.
@@ -1287,22 +1260,37 @@
 
       document.getElementById('info-wrap').className = phase.cls || '';
 
-      // Dim label style for the info block keys
-      const lbl = '<span style="opacity:0.45;font-size:0.85em;">';
-      const endlbl = '</span>';
+      // Aircraft family
+      const family = aircraftFamily(f.t);
+
+      // Info block uses a fixed-width label approach for clean column alignment
+      // Labels are padded to 7 chars so values start at the same column.
+      const R = (label, value, extra) => {
+        const padded = (label + '       ').slice(0, 7);
+        const lspan  = '<span class="info-label">' + padded + '</span>';
+        const vspan  = extra
+          ? '<span class="info-value ' + extra + '">' + value + '</span>'
+          : '<span class="info-value">' + value + '</span>';
+        return '<div class="info-row">' + lspan + vspan + '</div>';
+      };
 
       // Try inline route from ADS-B data first
       const inlineDep = f.dep || f.orig_iata || null;
       const inlineArr = f.arr || f.dest_iata || null;
       const inlineRoute = formatRoute(inlineDep, inlineArr);
 
-      document.getElementById('info').innerHTML =
-        lbl+'FLIGHT'+endlbl+'&nbsp;&nbsp; ' + callLink + '<br>' +
-        lbl+'REG'+endlbl+'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ' + reg + '<br>' +
-        lbl+'TYPE'+endlbl+'&nbsp;&nbsp;&nbsp;&nbsp; ' + typeStr + '<br>' +
-        lbl+'AIRLINE'+endlbl+'&nbsp; ' + airline + '<br>' +
-        lbl+'PHASE'+endlbl+'&nbsp;&nbsp;&nbsp; ' + phaseHtml +
-        (inlineRoute ? '<br>' + lbl+'ROUTE'+endlbl+'&nbsp;&nbsp;&nbsp; <span style="color:#a0d8ef;text-shadow:0 0 6px #6090b0;">' + inlineRoute + '</span>' : '');
+      let infoHtml =
+        R('FLIGHT', callLink) +
+        R('REG',    reg) +
+        R('TYPE',   typeStr) +
+        (family ? R('FAMILY', family, 'info-family') : '') +
+        R('AIRLINE', airline) +
+        R('PHASE',   phase.color
+            ? '<span style="color:' + phase.color + ';text-shadow:0 0 8px ' + phase.color + ';">' + phase.label + '</span>'
+            : phase.label) +
+        (inlineRoute ? R('ROUTE', '<span class="info-route">' + inlineRoute + '</span>') : '');
+
+      document.getElementById('info').innerHTML = infoHtml;
 
       // If no inline route, async lookup from adsbdb (updates display when ready)
       if (!inlineRoute && call !== '---') {
@@ -1368,7 +1356,6 @@
       logFlight(f, phase);
       fetchPhoto(reg, f.hex || '', (f.t || '').toUpperCase());
       updateMap(f.lat, f.lon, call, f.gs, f.track);
-      updateSilhouette(f);
       updateInterestingBadge(f);
       updateIntercept(f, distLoc);
     }
