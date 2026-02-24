@@ -45,9 +45,6 @@
       min-height: 100dvh; /* dvh accounts for mobile browser chrome */
     }
 
-    /* Soft orange glow on all text */
-    body.dotmatrix * { text-shadow: 0 0 2px var(--c-main), 0 0 8px var(--c-glow); }
-
     /* CRT scanline overlay — fixed pseudo-element, passes clicks through */
     body.dotmatrix::after {
       content: '';
@@ -108,14 +105,8 @@
       flex: 1;
       word-break: break-word;
     }
-    .info-family {
-      color: var(--c-dim);
-      font-size: 0.88em;
-      opacity: 0.8;
-    }
     .info-route {
       color: #a0d8ef;
-      text-shadow: 0 0 6px #6090b0 !important;
     }
 
     #main { line-height: 1.8; margin-bottom: 12px; font-size: clamp(0.72rem, 2vw, 0.78rem); opacity: 0.85; }
@@ -125,7 +116,7 @@
     body.dotmatrix button {
       background: none; border: 1px solid var(--c-main); color: var(--c-main);
       font-family: 'Share Tech Mono', monospace; font-size: 0.82rem;
-      padding: 10px 0; cursor: pointer; text-shadow: 0 0 6px var(--c-glow);
+      padding: 10px 0; cursor: pointer;
       flex: 1 1 60px; text-align: center;
       min-height: 44px; /* minimum touch target */
       -webkit-tap-highlight-color: transparent;
@@ -144,10 +135,9 @@
       background: none; border: 1px solid var(--c-main); color: var(--c-main);
       font-family: 'Share Tech Mono', monospace; font-size: 0.85rem;
       padding: 10px 8px; flex: 1; outline: none;
-      text-shadow: 0 0 6px var(--c-glow);
       min-height: 44px; -webkit-appearance: none;
     }
-    #location-input::placeholder { color: var(--c-dim); text-shadow: none; }
+    #location-input::placeholder { color: var(--c-dim); }
     #location-ctrl button { flex: 0 0 auto; width: auto; padding: 10px 12px; }
 
     /* Sliders */
@@ -170,7 +160,7 @@
 
     /* Map */
     #dm-map { width: 100%; height: clamp(180px, 40vw, 240px); margin-top: 12px; border: 1px solid var(--c-dim); }
-    #dm-map * { text-shadow: none; }
+    #dm-map * { }
     .dm-callout {
       background: var(--c-bg); border: 1px solid var(--c-main); color: var(--c-main);
       font-family: 'Share Tech Mono', monospace; font-size: 11px; padding: 2px 5px;
@@ -223,12 +213,9 @@
       font-size: 0.6rem;
       opacity: 0.45;
       letter-spacing: 0.06em;
-      text-shadow: none !important;  /* labels need no glow — keeps them crisp */
     }
-    /* Shared: crisp single-shadow for all data values */
     #main-grid .data-value {
       font-size: 0.82rem;
-      text-shadow: 0 0 4px var(--c-glow) !important;
     }
 
     /* ── Hover tooltips ── */
@@ -257,7 +244,6 @@
       transition: opacity 0.15s;
       z-index: 999;
       line-height: 1.5;
-      text-shadow: 0 0 4px var(--c-glow);
       box-shadow: 0 0 12px rgba(255,166,0,0.2);
     }
     /* Arrow */
@@ -282,27 +268,23 @@
     .data-item[data-tip]::before { left: 12px; transform: none; }
 
     /* ── Colour-coded data values ── */
-    /* Altitude bands */
-    .alt-ground  { color: #ff6060; text-shadow: 0 0 6px #ff4040 !important; }
-    .alt-low     { color: #ffcc40; text-shadow: 0 0 6px #ffaa00 !important; }
-    .alt-mid     { color: var(--c-main); text-shadow: 0 0 4px var(--c-glow) !important; }
-    .alt-high    { color: #60e8ff; text-shadow: 0 0 6px #40c8ff !important; }
-    .alt-vhigh   { color: #a0a0ff; text-shadow: 0 0 6px #8080ff !important; }
+    .alt-ground  { color: #ff6060; }
+    .alt-low     { color: #ffcc40; }
+    .alt-mid     { color: var(--c-main); }
+    .alt-high    { color: #60e8ff; }
+    .alt-vhigh   { color: #a0a0ff; }
 
-    /* Vertical speed */
-    .vs-climbing   { color: #60ff90; text-shadow: 0 0 6px #40dd70 !important; }
-    .vs-descending { color: #ff6060; text-shadow: 0 0 6px #ff4040 !important; }
-    .vs-level      { color: var(--c-main); text-shadow: 0 0 4px var(--c-glow) !important; }
+    .vs-climbing   { color: #60ff90; }
+    .vs-descending { color: #ff6060; }
+    .vs-level      { color: var(--c-main); }
 
-    /* Speed bands */
-    .spd-slow   { color: var(--c-dim); text-shadow: 0 0 3px var(--c-dim) !important; }
-    .spd-normal { color: var(--c-main); text-shadow: 0 0 4px var(--c-glow) !important; }
-    .spd-fast   { color: #60e8ff; text-shadow: 0 0 6px #40c8ff !important; }
+    .spd-slow   { color: var(--c-dim); }
+    .spd-normal { color: var(--c-main); }
+    .spd-fast   { color: #60e8ff; }
 
-    /* Distance proximity */
-    .dist-close  { color: #ff9040; text-shadow: 0 0 6px #ff7000 !important; }
-    .dist-medium { color: var(--c-main); text-shadow: 0 0 4px var(--c-glow) !important; }
-    .dist-far    { color: var(--c-dim); text-shadow: 0 0 3px var(--c-dim) !important; }
+    .dist-close  { color: #ff9040; }
+    .dist-medium { color: var(--c-main); }
+    .dist-far    { color: var(--c-dim); }
 
     /* ── Interesting flight badge ── */
     #interesting-badge {
@@ -312,7 +294,6 @@
       border: 1px solid #ffee44;
       background: rgba(255,238,68,0.07);
       color: #ffee44;
-      text-shadow: 0 0 8px #ffcc00;
       font-size: 0.72rem;
       letter-spacing: 0.04em;
     }
@@ -324,15 +305,9 @@
       font-size: 0.72rem;
       min-height: 1.2em;
     }
-    #intercept-wrap .intercept-closing {
-      color: #ff9040; text-shadow: 0 0 8px #ff7000;
-    }
-    #intercept-wrap .intercept-overhead {
-      color: #60ff90; text-shadow: 0 0 8px #40dd70;
-    }
-    #intercept-wrap .intercept-receding {
-      color: var(--c-dim);
-    }
+    #intercept-wrap .intercept-closing  { color: #ff9040; }
+    #intercept-wrap .intercept-overhead { color: #60ff90; }
+    #intercept-wrap .intercept-receding { color: var(--c-dim); }
 
     /* ── Keyboard help overlay ── */
     #kbd-overlay {
@@ -376,6 +351,36 @@
       font-size: 0.75rem; padding: 8px;
     }
 
+    /* ── Statistics panel ── */
+    #stats-section { margin-top: 10px; }
+    #stats-section summary {
+      cursor: pointer; font-size: 0.78rem; opacity: 0.7;
+      padding: 4px 0; list-style: none;
+      user-select: none; -webkit-user-select: none;
+    }
+    #stats-section summary::-webkit-details-marker { display: none; }
+    #stats-panel {
+      margin-top: 8px;
+      border: 1px solid var(--c-dim);
+      padding: 10px 12px;
+      font-size: 0.72rem;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 16px;
+      margin-bottom: 10px;
+    }
+    .stat-block { display: flex; flex-direction: column; gap: 2px; }
+    .stat-label { font-size: 0.58rem; opacity: 0.45; letter-spacing: 0.06em; }
+    .stat-value { font-size: 0.8rem; line-height: 1.3; }
+    .stat-sub   { font-size: 0.62rem; opacity: 0.55; margin-top: 1px; }
+    .stats-divider {
+      border: none; border-top: 1px solid var(--c-dim);
+      opacity: 0.4; margin: 8px 0;
+    }
+    #stats-empty { opacity: 0.4; font-size: 0.72rem; }
+
     /* Emergency squawk banner */
     #emerg-banner {
       display: none;
@@ -384,7 +389,6 @@
       border: 2px solid #ff2020;
       background: rgba(255,0,0,0.08);
       color: #ff2020;
-      text-shadow: 0 0 10px #ff0000;
       font-size: 0.85rem;
       animation: emerg-flash 0.8s step-end infinite;
       cursor: pointer;
@@ -492,6 +496,58 @@
     <details id="log-section">
       <summary>▶ SESSION LOG (<span id="log-count">0</span> FLIGHTS)</summary>
       <div id="log-list"><span style="opacity:0.4">No flights recorded yet.</span></div>
+    </details>
+
+    <!-- Statistics panel: collapsible, updated on each fetch -->
+    <details id="stats-section">
+      <summary>▶ SESSION STATS</summary>
+      <div id="stats-panel">
+        <span id="stats-empty">No data yet — stats build up as flights are tracked.</span>
+        <div id="stats-content" style="display:none">
+          <div class="stats-grid">
+            <div class="stat-block">
+              <span class="stat-label">TOTAL SEEN</span>
+              <span class="stat-value" id="st-total">0</span>
+            </div>
+            <div class="stat-block">
+              <span class="stat-label">CURRENTLY IN RANGE</span>
+              <span class="stat-value" id="st-active">0</span>
+            </div>
+            <div class="stat-block">
+              <span class="stat-label">BUSIEST AIRLINE</span>
+              <span class="stat-value" id="st-airline">---</span>
+              <span class="stat-sub" id="st-airline-sub"></span>
+            </div>
+            <div class="stat-block">
+              <span class="stat-label">MOST COMMON TYPE</span>
+              <span class="stat-value" id="st-type">---</span>
+              <span class="stat-sub" id="st-type-sub"></span>
+            </div>
+          </div>
+          <hr class="stats-divider">
+          <div class="stats-grid">
+            <div class="stat-block">
+              <span class="stat-label">HIGHEST ALTITUDE</span>
+              <span class="stat-value" id="st-maxalt">---</span>
+              <span class="stat-sub" id="st-maxalt-sub"></span>
+            </div>
+            <div class="stat-block">
+              <span class="stat-label">FASTEST AIRCRAFT</span>
+              <span class="stat-value" id="st-maxspd">---</span>
+              <span class="stat-sub" id="st-maxspd-sub"></span>
+            </div>
+            <div class="stat-block">
+              <span class="stat-label">CLOSEST APPROACH</span>
+              <span class="stat-value" id="st-closest">---</span>
+              <span class="stat-sub" id="st-closest-sub"></span>
+            </div>
+            <div class="stat-block">
+              <span class="stat-label">INTERESTING FLIGHTS</span>
+              <span class="stat-value" id="st-interesting">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </details>
 
   </div>
@@ -636,57 +692,8 @@
       B06:'BELL 206', B407:'BELL 407',
     };
 
-    // ICAO type code → aircraft family (manufacturer + programme)
-    const AIRCRAFT_FAMILY_DB = {
-      // Boeing narrowbody
-      B737:'BOEING 737', B738:'BOEING 737', B739:'BOEING 737', B73X:'BOEING 737',
-      B37M:'BOEING 737 MAX', B38M:'BOEING 737 MAX', B39M:'BOEING 737 MAX', B3XM:'BOEING 737 MAX',
-      B752:'BOEING 757', B753:'BOEING 757',
-      B762:'BOEING 767', B763:'BOEING 767', B764:'BOEING 767',
-      // Boeing widebody
-      B772:'BOEING 777', B77L:'BOEING 777', B773:'BOEING 777', B77W:'BOEING 777',
-      B778:'BOEING 777X', B779:'BOEING 777X',
-      B788:'BOEING 787', B789:'BOEING 787', B78X:'BOEING 787',
-      B741:'BOEING 747', B742:'BOEING 747', B743:'BOEING 747', B744:'BOEING 747', B748:'BOEING 747',
-      B712:'BOEING 717', B721:'BOEING 727', B722:'BOEING 727',
-      // Airbus narrowbody
-      A318:'AIRBUS A320 FAMILY', A319:'AIRBUS A320 FAMILY', A320:'AIRBUS A320 FAMILY', A321:'AIRBUS A320 FAMILY',
-      A19N:'AIRBUS A320neo FAMILY', A20N:'AIRBUS A320neo FAMILY', A21N:'AIRBUS A320neo FAMILY', A21X:'AIRBUS A320neo FAMILY',
-      BCS1:'AIRBUS A220', BCS3:'AIRBUS A220',
-      // Airbus widebody
-      A332:'AIRBUS A330', A333:'AIRBUS A330', A338:'AIRBUS A330neo', A339:'AIRBUS A330neo',
-      A342:'AIRBUS A340', A343:'AIRBUS A340', A345:'AIRBUS A340', A346:'AIRBUS A340',
-      A359:'AIRBUS A350', A35K:'AIRBUS A350',
-      A380:'AIRBUS A380', A388:'AIRBUS A380',
-      // Embraer
-      E170:'EMBRAER E-JET', E175:'EMBRAER E-JET', E190:'EMBRAER E-JET', E195:'EMBRAER E-JET',
-      E75L:'EMBRAER E2', E290:'EMBRAER E2', E295:'EMBRAER E2',
-      // Bombardier regional
-      CRJ2:'BOMBARDIER CRJ', CRJ7:'BOMBARDIER CRJ', CRJ9:'BOMBARDIER CRJ', CRJX:'BOMBARDIER CRJ',
-      // Turboprops
-      DH8A:'DE HAVILLAND DASH 8', DH8B:'DE HAVILLAND DASH 8', DH8C:'DE HAVILLAND DASH 8', DH8D:'DE HAVILLAND DASH 8',
-      AT43:'ATR', AT45:'ATR', AT72:'ATR', AT75:'ATR', AT76:'ATR',
-      SF34:'SAAB', SB20:'SAAB',
-      PC12:'PILATUS', C208:'CESSNA',
-      // Business jets
-      GL5T:'GULFSTREAM', GLEX:'BOMBARDIER GLOBAL', GLF6:'GULFSTREAM',
-      C25A:'CESSNA CITATION', C25B:'CESSNA CITATION', C68A:'CESSNA CITATION',
-      FA7X:'DASSAULT FALCON', FA8X:'DASSAULT FALCON',
-      // Military
-      C130:'LOCKHEED MARTIN', C17:'BOEING MILITARY', P8:'BOEING MILITARY',
-      // Helicopters
-      EC35:'AIRBUS HELICOPTERS', EC45:'AIRBUS HELICOPTERS',
-      S76:'SIKORSKY', AS32:'AIRBUS HELICOPTERS',
-      B06:'BELL', B407:'BELL',
-    };
-
-    function aircraftFamily(typeCode) {
-      return AIRCRAFT_FAMILY_DB[(typeCode || '').toUpperCase()] || null;
-    }
-
     // Combines type code + emitter category into one readable string.
-    // Returns { type: string, family: string|null }
-    // e.g. type="B789", category="A5" → { type: "B787-9 (HEAVY)", family: "BOEING 787" }
+    // e.g. type="B789", category="A5" → "B787-9 (HEAVY)"
     function formatType(t, category) {
       const typeCode = (t || '').toUpperCase();
       const cat      = (category || '').toUpperCase();
@@ -710,7 +717,7 @@
     function formatSquawk(sqk) {
       if (!sqk || sqk === '---') return '---';
       const emerg = EMERG_SQUAWKS[sqk];
-      if (emerg) return '<span style="color:#ff2020;text-shadow:0 0 8px #ff0000;">' + sqk + ' \u26a0 ' + emerg + '</span>';
+      if (emerg) return '<span style="color:#ff2020;">' + sqk + ' \u26a0 ' + emerg + '</span>';
       return sqk;
     }
 
@@ -841,17 +848,31 @@
 
     // ── Session log ──────────────────────────────────────────────────
     // Records every unique aircraft (by hex) seen this session. Newest first.
-    const sessionLog = new Map(); // hex → { call, type, timeStr, phase }
+    const sessionLog = new Map(); // hex → { call, type, timeStr, phase, airline, alt, gs, dist, interesting }
 
-    function logFlight(f, phase) {
+    function logFlight(f, phase, distKm) {
       const hex = f.hex || f.r || '';
-      if (!hex || sessionLog.has(hex)) return;
+      if (!hex) return;
       const call    = (f.flight || '---').trim().toUpperCase();
       const type    = formatType(f.t, f.category);
       const now     = new Date();
       const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-      sessionLog.set(hex, { call, type, timeStr, phase: phase.label });
-      renderLog();
+      const airline = airlineFromCallsign(call);
+      const alt     = typeof f.alt_baro === 'number' ? f.alt_baro : null;
+      const gs      = typeof f.gs      === 'number' ? f.gs      : null;
+      const flags   = detectInteresting(f);
+
+      if (sessionLog.has(hex)) {
+        // Update mutable fields that can change between refreshes
+        const entry = sessionLog.get(hex);
+        if (alt !== null && (entry.alt === null || alt > entry.alt)) entry.alt = alt;
+        if (gs  !== null && (entry.gs  === null || gs  > entry.gs )) entry.gs  = gs;
+        if (entry.dist === null || distKm < entry.dist) entry.dist = distKm;
+      } else {
+        sessionLog.set(hex, { call, type, timeStr, phase: phase.label, airline,
+          alt, gs, dist: distKm, interesting: flags.length > 0 });
+        renderLog();
+      }
     }
 
     function renderLog() {
@@ -866,6 +887,69 @@
         '<strong>' + e.call + '</strong> ' + e.type +
         ' <span style="opacity:0.6">' + e.phase + '</span></div>'
       ).join('');
+    }
+
+    // ── Statistics ───────────────────────────────────────────────────
+    // Called after each render with the current live flights list.
+    function updateStats(liveFlights) {
+      const entries = Array.from(sessionLog.values());
+      if (!entries.length) return;
+
+      document.getElementById('stats-empty').style.display   = 'none';
+      document.getElementById('stats-content').style.display = 'block';
+
+      // Total seen & currently active
+      document.getElementById('st-total').textContent  = entries.length;
+      document.getElementById('st-active').textContent = liveFlights.length;
+
+      // Busiest airline — tally by airline name, skip '---' and bare prefixes
+      const airlineCounts = {};
+      for (const e of entries) {
+        const a = e.airline;
+        if (a && a !== '---' && a.length > 3) airlineCounts[a] = (airlineCounts[a] || 0) + 1;
+      }
+      const topAirline = Object.entries(airlineCounts).sort((a,b) => b[1]-a[1])[0];
+      if (topAirline) {
+        document.getElementById('st-airline').textContent     = topAirline[0];
+        document.getElementById('st-airline-sub').textContent = topAirline[1] + ' FLIGHT' + (topAirline[1] > 1 ? 'S' : '');
+      }
+
+      // Most common aircraft type — use the base type code, skip '---'
+      const typeCounts = {};
+      for (const e of entries) {
+        const t = e.type.split(' (')[0]; // strip "(HEAVY)" etc.
+        if (t && t !== '---') typeCounts[t] = (typeCounts[t] || 0) + 1;
+      }
+      const topType = Object.entries(typeCounts).sort((a,b) => b[1]-a[1])[0];
+      if (topType) {
+        document.getElementById('st-type').textContent     = topType[0];
+        document.getElementById('st-type-sub').textContent = topType[1] + ' SEEN';
+      }
+
+      // Highest altitude
+      const byAlt = entries.filter(e => e.alt !== null).sort((a,b) => b.alt - a.alt)[0];
+      if (byAlt) {
+        document.getElementById('st-maxalt').textContent     = formatAlt(byAlt.alt);
+        document.getElementById('st-maxalt-sub').textContent = byAlt.call;
+      }
+
+      // Fastest aircraft
+      const bySpd = entries.filter(e => e.gs !== null).sort((a,b) => b.gs - a.gs)[0];
+      if (bySpd) {
+        document.getElementById('st-maxspd').textContent     = Math.round(bySpd.gs) + ' KT';
+        document.getElementById('st-maxspd-sub').textContent = bySpd.call;
+      }
+
+      // Closest approach
+      const byDist = entries.filter(e => e.dist !== null).sort((a,b) => a.dist - b.dist)[0];
+      if (byDist) {
+        document.getElementById('st-closest').textContent     = byDist.dist.toFixed(1) + ' KM';
+        document.getElementById('st-closest-sub').textContent = byDist.call;
+      }
+
+      // Interesting flights count
+      const intCount = entries.filter(e => e.interesting).length;
+      document.getElementById('st-interesting').textContent = intCount;
     }
 
 
@@ -1255,13 +1339,10 @@
 
       const phase     = flightPhase(f);
       const phaseHtml = phase.color
-        ? '<span style="color:' + phase.color + ';text-shadow:0 0 8px ' + phase.color + ';">' + phase.label + '</span>'
+        ? '<span style="color:' + phase.color + ';">' + phase.label + '</span>'
         : phase.label;
 
       document.getElementById('info-wrap').className = phase.cls || '';
-
-      // Aircraft family
-      const family = aircraftFamily(f.t);
 
       // Info block uses a fixed-width label approach for clean column alignment
       // Labels are padded to 7 chars so values start at the same column.
@@ -1283,10 +1364,9 @@
         R('FLIGHT', callLink) +
         R('REG',    reg) +
         R('TYPE',   typeStr) +
-        (family ? R('FAMILY', family, 'info-family') : '') +
         R('AIRLINE', airline) +
         R('PHASE',   phase.color
-            ? '<span style="color:' + phase.color + ';text-shadow:0 0 8px ' + phase.color + ';">' + phase.label + '</span>'
+            ? '<span style="color:' + phase.color + ';">' + phase.label + '</span>'
             : phase.label) +
         (inlineRoute ? R('ROUTE', '<span class="info-route">' + inlineRoute + '</span>') : '');
 
@@ -1353,7 +1433,7 @@
         prevTopHex = f.hex;
       }
 
-      logFlight(f, phase);
+      logFlight(f, phase, distLoc);
       fetchPhoto(reg, f.hex || '', (f.t || '').toUpperCase());
       updateMap(f.lat, f.lon, call, f.gs, f.track);
       updateInterestingBadge(f);
@@ -1512,6 +1592,7 @@
         flights = ac; flightIndex = 0;
         checkEmergencySquawks();
         render(flights[0]);
+        updateStats(flights);
       } catch(e) {
         if (e.name === 'AbortError') return;
         console.error(e);
