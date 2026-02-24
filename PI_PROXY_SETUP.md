@@ -100,6 +100,7 @@ sudo mv cloudflared /usr/local/bin/
 /home/pi/proxy/
 ├── server.js          # Main proxy server
 ├── dashboard.html     # Browser dashboard UI
+├── display.py         # 3.5" TFT dashboard (framebuffer)
 ├── package.json
 └── data/
     └── peak.json      # Persisted hourly traffic counts (auto-created)
@@ -332,28 +333,62 @@ cloudflared tunnel route dns overhead-tracker dashboard.overheadtracker.com
 
 ---
 
+## 3.5" TFT Display
+
+**Hardware:** Generic MPI3501 clone (ILI9486 SPI, 480×320, resistive touch)
+**Driver:** `tft35a` dtoverlay (installed via goodtft/LCD-show `LCD35-show`)
+
+### How it works
+
+`display.py` uses pygame with `SDL_VIDEODRIVER=offscreen` to render in memory,
+then converts the surface to RGB565 and writes directly to `/dev/fb1`.
+No X server or desktop environment needed.
+
+Dependencies: `python3-pygame`, `python3-numpy`, `requests`
+
+### Relevant boot config (`/boot/firmware/config.txt`)
+
+```
+dtparam=spi=on
+dtoverlay=tft35a:rotate=270
+```
+
+### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Black screen after reboot | `ls /dev/fb1` — if missing, driver didn't load; check config.txt |
+| `pm2 logs display` shows errors | Check for numpy/pygame import errors |
+| Display shows "proxy unreachable" | proxy PM2 service is down; `pm2 restart proxy` |
+
+---
+
 ## PM2 Services
 
 | Name    | Command                                        | Purpose               |
 |---------|------------------------------------------------|-----------------------|
 | proxy   | `node /home/pi/proxy/server.js`               | Flight data proxy     |
 | tunnel  | `cloudflared tunnel run overhead-tracker`     | Cloudflare Tunnel     |
+| display | `python3 /home/pi/proxy/display.py`           | 3.5" TFT dashboard    |
 
 ### Setup commands
 ```bash
 pm2 start server.js --name proxy
 pm2 start "cloudflared tunnel run overhead-tracker" --name tunnel
+pm2 start "python3 /home/pi/proxy/display.py" --name display
 pm2 save
-pm2 startup  # then ran the printed sudo command
+pm2 startup  # then run the printed sudo command
 ```
 
 ### Useful PM2 commands
 ```bash
-pm2 status              # check both services are online
+pm2 status              # check all 3 services are online
 pm2 logs proxy          # see [FETCH] and [CACHE HIT] activity
 pm2 logs tunnel         # check tunnel connection status
+pm2 logs display        # check display rendering errors
 pm2 restart proxy       # restart proxy after code changes
 pm2 restart tunnel      # restart if tunnel drops
+pm2 restart display     # restart after display.py changes
 ```
 
 ---
