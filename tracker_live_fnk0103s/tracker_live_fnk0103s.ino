@@ -12,10 +12,12 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <SD.h>
 #include <math.h>
 #include <Preferences.h>
+#include <time.h>
 
 TFT_eSPI tft = TFT_eSPI();
 
@@ -58,6 +60,7 @@ const int CYCLE_SECS   = 8;
 float HOME_LAT    = -33.8598f;
 float HOME_LON    = 151.1369f;
 float GEOFENCE_KM = 10.0f;
+int   ALT_FLOOR_FT = 500;
 char  LOCATION_NAME[32] = "RUSSELL LEA";
 
 // ─── SD state ─────────────────────────────────────────
@@ -123,9 +126,10 @@ bool          usingCache   = false;
 int           dataSource   = 0;
 unsigned long lastTick     = 0;
 unsigned long lastCycle    = 0;
+time_t        cacheTimestamp = 0;  // Unix time when cache.json was last written
 
 // ─── Session log (track unique callsigns to avoid duplicates) ─
-#define MAX_LOGGED 50
+#define MAX_LOGGED 200
 char loggedCallsigns[MAX_LOGGED][12];
 int  loggedCount = 0;
 
@@ -276,15 +280,17 @@ bool formatRoute(const char* dep, const char* arr, char* buf, int len) {
 }
 
 // ─── Flight status derivation ─────────────────────────
+// Thresholds kept in sync with web app flightPhase().
 FlightStatus deriveStatus(int alt, int vs, float dist) {
   if (alt <= 0) return STATUS_UNKNOWN;
   if (dist < 2.0f && alt < 8000) return STATUS_OVERHEAD;
-  if (alt < 1000)  return (vs > 200) ? STATUS_TAKING_OFF : STATUS_LANDING;
-  if (alt < 5000 && vs >  800) return STATUS_TAKING_OFF;
-  if (alt < 4000 && vs < -300) return STATUS_APPROACH;
-  if (alt < 6000 && vs < -500) return STATUS_APPROACH;
-  if (vs >  400) return STATUS_CLIMBING;
-  if (vs < -400) return STATUS_DESCENDING;
+  if (alt < 3000) {
+    if (vs < -200) return STATUS_LANDING;
+    if (vs >  200) return STATUS_TAKING_OFF;
+    if (vs <  -50) return STATUS_APPROACH;
+  }
+  if (vs < -100) return STATUS_DESCENDING;
+  if (vs >  100) return STATUS_CLIMBING;
   return STATUS_CRUISING;
 }
 
@@ -352,9 +358,10 @@ void loadConfig() {
     String key = line.substring(0, eq);
     String val = line.substring(eq + 1);
     key.trim(); val.trim();
-    if      (key == "lat")      HOME_LAT    = val.toFloat();
-    else if (key == "lon")      HOME_LON    = val.toFloat();
-    else if (key == "geofence") GEOFENCE_KM = val.toFloat();
+    if      (key == "lat")       HOME_LAT     = val.toFloat();
+    else if (key == "lon")       HOME_LON     = val.toFloat();
+    else if (key == "geofence")  GEOFENCE_KM  = val.toFloat();
+    else if (key == "alt_floor") ALT_FLOOR_FT = val.toInt();
     else if (key == "name") {
       val.toUpperCase();
       strlcpy(LOCATION_NAME, val.c_str(), sizeof(LOCATION_NAME));
@@ -372,6 +379,13 @@ void writeCache(const String& payload) {
   if (!f) { Serial.println("Cache write failed"); return; }
   f.print(payload);
   f.close();
+  // Write timestamp alongside the cache
+  time_t now = time(NULL);
+  if (now > 1000000000) {  // only write if NTP has synced (epoch > ~2001)
+    File tf = SD.open("/cache_ts.txt", FILE_WRITE);
+    if (tf) { tf.print((unsigned long)now); tf.close(); }
+    cacheTimestamp = now;
+  }
   Serial.printf("Cache written (%d bytes)\n", payload.length());
 }
 
@@ -382,7 +396,13 @@ String readCache() {
   if (!f) return "";
   String payload = f.readString();
   f.close();
-  Serial.printf("Cache loaded (%d bytes)\n", payload.length());
+  // Read associated timestamp if present
+  File tf = SD.open("/cache_ts.txt", FILE_READ);
+  if (tf) {
+    cacheTimestamp = (time_t)tf.readString().toInt();
+    tf.close();
+  }
+  Serial.printf("Cache loaded (%d bytes, ts=%lu)\n", payload.length(), (unsigned long)cacheTimestamp);
   return payload;
 }
 
@@ -509,6 +529,15 @@ void drawStatusBar() {
   char buf[80];
   if (isFetching) {
     snprintf(buf, sizeof(buf), "  SCANNING AIRSPACE...");
+  } else if (dataSource == 2 && cacheTimestamp > 0) {
+    time_t now = time(NULL);
+    long ageSec = (now > cacheTimestamp) ? (long)(now - cacheTimestamp) : 0;
+    if (ageSec < 3600)
+      snprintf(buf, sizeof(buf), "  AC %d/%d   SRC:CACHE(%ldm%lds)   NEXT:%ds",
+               flightIndex+1, flightCount, ageSec/60, ageSec%60, countdown);
+    else
+      snprintf(buf, sizeof(buf), "  AC %d/%d   SRC:CACHE(%ldh%ldm)   NEXT:%ds",
+               flightIndex+1, flightCount, ageSec/3600, (ageSec%3600)/60, countdown);
   } else {
     const char* src = dataSource==2 ? "CACHE" : dataSource==1 ? "DIRECT" : "PROXY";
     snprintf(buf, sizeof(buf), "  AC %d/%d   SRC:%s   NEXT:%ds",
@@ -815,6 +844,41 @@ String fetchFromProxy() {
   return "";
 }
 
+// ─── Root CA for api.airplanes.live (ISRG Root X1 / Let's Encrypt) ──
+static const char AIRPLANES_LIVE_CA[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
+ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
+MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoBggIBAK3oJHP0FDfzm54rVygc
+h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
+0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
+A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
+T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
+B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
+B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
+KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
+OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
+jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
+qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
+rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
+HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
+hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
+ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
+3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
+NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
+ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
+TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
+jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
+oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
+4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
+mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
+emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
+-----END CERTIFICATE-----
+)EOF";
+
 // ─── Fetch: direct API — zero-allocation stream scanner ──
 static bool readQuotedString(WiFiClient* s, char* buf, int maxLen) {
   int i = 0;
@@ -846,8 +910,10 @@ int fetchAndParseDirectAPI() {
     "https://api.airplanes.live/v2/point/%.4f/%.4f/%d",
     HOME_LAT, HOME_LON, apiRadiusNm());
 
+  WiFiClientSecure tlsClient;
+  tlsClient.setCACert(AIRPLANES_LIVE_CA);
   HTTPClient http;
-  http.begin(url);
+  http.begin(tlsClient, url);
   http.setTimeout(12000);
   int code = http.GET();
   if (code != 200) {
@@ -873,7 +939,7 @@ int fetchAndParseDirectAPI() {
 
   auto commitAircraft = [&]() {
     if (newCount >= 20) return;
-    if (ac_alt < 500 || ac_lat == 0.0f) return;
+    if (ac_alt < ALT_FLOOR_FT || ac_lat == 0.0f) return;
     float dist = haversineKm(HOME_LAT, HOME_LON, ac_lat, ac_lon);
     if (dist > GEOFENCE_KM) return;
     Flight& f = newFlights[newCount];
@@ -967,7 +1033,7 @@ int extractFlights(DynamicJsonDocument& doc) {
     float lat = a["lat"] | 0.0f;
     float lon = a["lon"] | 0.0f;
     int   alt = a["alt_baro"] | 0;
-    if (alt < 500 || lat == 0.0f) continue;
+    if (alt < ALT_FLOOR_FT || lat == 0.0f) continue;
     float dist = haversineKm(HOME_LAT, HOME_LON, lat, lon);
     if (dist > GEOFENCE_KM) continue;
 
@@ -1187,6 +1253,9 @@ void setup() {
       delay(120);
     }
     delay(300);
+    // Sync NTP so cache timestamps are meaningful
+    configTime(0, 0, "pool.ntp.org");
+    Serial.println("NTP sync started");
   }
 
   if (WiFi.status() != WL_CONNECTED) {
