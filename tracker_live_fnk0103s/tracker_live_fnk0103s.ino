@@ -60,12 +60,14 @@ const int CYCLE_SECS   = 8;
 #define C_CYAN    0x07FF
 #define C_YELLOW  0xFFE0
 
-// ─── Location (defaults — overridden by config.txt) ───
+// ─── Location (defaults — overridden by NVS / config.txt) ────────────────
 float HOME_LAT    = REDACTEDf;
 float HOME_LON    = REDACTEDf;
 float GEOFENCE_KM = 10.0f;
 int   ALT_FLOOR_FT = 500;
 char  LOCATION_NAME[32] = "REDACTED";
+char  HOME_QUERY[128]   = "";   // plain-text search; cleared after geocoding
+bool  needsGeocode      = false;
 
 // ─── SD state ─────────────────────────────────────────
 bool sdAvailable = false;
@@ -503,12 +505,19 @@ bool loadWiFiConfig() {
   if (!p.isKey("wifi_ssid")) { p.end(); return false; }
   strlcpy(WIFI_SSID, p.getString("wifi_ssid", "").c_str(), sizeof(WIFI_SSID));
   strlcpy(WIFI_PASS, p.getString("wifi_pass", "").c_str(), sizeof(WIFI_PASS));
-  HOME_LAT = p.getFloat("home_lat", HOME_LAT);
-  HOME_LON = p.getFloat("home_lon", HOME_LON);
-  String name = p.getString("home_name", "");
-  if (name.length() > 0) {
-    name.toUpperCase();
-    strlcpy(LOCATION_NAME, name.c_str(), sizeof(LOCATION_NAME));
+  // Location: use saved lat/lon if available; otherwise schedule geocoding
+  if (p.isKey("home_lat")) {
+    HOME_LAT = p.getFloat("home_lat", HOME_LAT);
+    HOME_LON = p.getFloat("home_lon", HOME_LON);
+    String name = p.getString("home_name", "");
+    if (name.length() > 0) {
+      name.toUpperCase();
+      strlcpy(LOCATION_NAME, name.c_str(), sizeof(LOCATION_NAME));
+    }
+    needsGeocode = false;
+  } else if (p.isKey("home_query")) {
+    strlcpy(HOME_QUERY, p.getString("home_query", "").c_str(), sizeof(HOME_QUERY));
+    needsGeocode = true;
   }
   geoIndex = p.getInt("gfence_idx", 1);
   if (geoIndex < 0 || geoIndex >= GEO_COUNT) geoIndex = 1;
@@ -517,15 +526,16 @@ bool loadWiFiConfig() {
   return true;
 }
 
-void saveWiFiConfig(const char* ssid, const char* pass,
-                    float lat, float lon, const char* name) {
+void saveWiFiConfig(const char* ssid, const char* pass, const char* query) {
   Preferences p;
   p.begin("tracker", false);
-  p.putString("wifi_ssid", ssid);
-  p.putString("wifi_pass", pass);
-  p.putFloat("home_lat",  lat);
-  p.putFloat("home_lon",  lon);
-  p.putString("home_name", name);
+  p.putString("wifi_ssid",  ssid);
+  p.putString("wifi_pass",  pass);
+  p.putString("home_query", query);
+  // Clear cached lat/lon so geocoding runs on next boot
+  p.remove("home_lat");
+  p.remove("home_lon");
+  p.remove("home_name");
   p.end();
 }
 
@@ -536,54 +546,113 @@ void saveGeoIndex() {
   p.end();
 }
 
+// ─── Geocoding (Nominatim) ────────────────────────────
+bool geocodeLocation(const char* query) {
+  // URL-encode: replace spaces with +
+  char encoded[192];
+  int j = 0;
+  for (int i = 0; query[i] && j < (int)sizeof(encoded) - 1; i++) {
+    if (query[i] == ' ') encoded[j++] = '+';
+    else                  encoded[j++] = query[i];
+  }
+  encoded[j] = '\0';
+
+  char url[320];
+  snprintf(url, sizeof(url),
+    "https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1",
+    encoded);
+
+  WiFiClientSecure client;
+  client.setInsecure();  // OK for a one-time geocode request
+  HTTPClient http;
+  http.begin(client, url);
+  http.addHeader("User-Agent", "OverheadTracker/1.0");
+  http.setTimeout(8000);
+  int code = http.GET();
+  if (code != 200) {
+    Serial.printf("Geocode HTTP error: %d\n", code);
+    http.end();
+    return false;
+  }
+  String body = http.getString();
+  http.end();
+
+  DynamicJsonDocument doc(1024);
+  if (deserializeJson(doc, body) != DeserializationError::Ok || !doc.is<JsonArray>()) {
+    Serial.println("Geocode JSON parse error");
+    return false;
+  }
+  JsonArray arr = doc.as<JsonArray>();
+  if (arr.size() == 0) {
+    Serial.println("Geocode: no results");
+    return false;
+  }
+  HOME_LAT = arr[0]["lat"].as<const char*>() ? String(arr[0]["lat"].as<const char*>()).toFloat() : 0.0f;
+  HOME_LON = arr[0]["lon"].as<const char*>() ? String(arr[0]["lon"].as<const char*>()).toFloat() : 0.0f;
+
+  // Extract short name: first segment of display_name before the first comma
+  String dispName = arr[0]["display_name"].as<String>();
+  int comma = dispName.indexOf(',');
+  String shortName = (comma > 0 && comma <= 30) ? dispName.substring(0, comma) : dispName.substring(0, 30);
+  shortName.toUpperCase();
+  strlcpy(LOCATION_NAME, shortName.c_str(), sizeof(LOCATION_NAME));
+
+  Serial.printf("Geocoded: %s → %.4f, %.4f\n", LOCATION_NAME, HOME_LAT, HOME_LON);
+
+  // Persist to NVS and clear the pending query
+  Preferences p;
+  p.begin("tracker", false);
+  p.putFloat("home_lat",  HOME_LAT);
+  p.putFloat("home_lon",  HOME_LON);
+  p.putString("home_name", LOCATION_NAME);
+  p.remove("home_query");
+  p.end();
+  HOME_QUERY[0] = '\0';
+  needsGeocode = false;
+  return true;
+}
+
 // ─── Captive portal ───────────────────────────────────
 
 void handleSetupRoot() {
-  char latBuf[14], lonBuf[14];
-  dtostrf(HOME_LAT, 9, 4, latBuf);
-  dtostrf(HOME_LON, 10, 4, lonBuf);
-  // Build page with snprintf — %% becomes % in output
-  char page[3200];
+  // Use <b> for field labels — more reliable than <label> in captive portal WebViews.
+  // placeholders serve as fallback if styling is stripped.
+  const char* locDefault = HOME_QUERY[0] ? HOME_QUERY : LOCATION_NAME;
+  static char page[2048];
   snprintf(page, sizeof(page),
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>OVERHEAD TRACKER SETUP</title>"
+    "<title>OVERHEAD SETUP</title>"
     "<style>"
-    "body{background:#041010;color:#fd0;font-family:monospace;padding:20px;max-width:480px;margin:auto}"
-    "h1{color:#fd0;font-size:1.1em;letter-spacing:2px;border-bottom:1px solid #3900;padding-bottom:8px;margin-bottom:0}"
-    "label{display:block;margin:16px 0 4px;color:#7940;font-size:.8em;letter-spacing:1px}"
-    "input{width:100%%;box-sizing:border-box;background:#0d1f1f;border:1px solid #3900;"
-    "color:#fd0;padding:10px;font-family:monospace;font-size:1em}"
-    "input:focus{outline:none;border-color:#fd0}"
-    "button{width:100%%;margin-top:24px;padding:14px;background:#fd0;color:#041010;"
-    "border:none;font-family:monospace;font-size:1em;letter-spacing:2px;font-weight:bold}"
+    "*{box-sizing:border-box}"
+    "body{background:#041010;color:#fd0;font-family:monospace;padding:16px;max-width:480px;margin:auto}"
+    "h2{font-size:1em;letter-spacing:3px;margin:0 0 20px;padding-bottom:8px;border-bottom:1px solid #3900}"
+    "b{display:block;font-size:.8em;letter-spacing:1px;margin:16px 0 4px;color:#fd0}"
+    "input{display:block;width:100%%;background:#0d1f1f;border:1px solid #fd0;"
+    "color:#fd0;padding:10px;font-family:monospace;font-size:1em;margin-bottom:2px}"
+    "button{display:block;width:100%%;margin-top:20px;padding:14px;background:#fd0;"
+    "color:#041010;border:none;font-family:monospace;font-size:1em;font-weight:bold;letter-spacing:2px}"
     "</style></head><body>"
-    "<h1>OVERHEAD TRACKER &mdash; SETUP</h1>"
+    "<h2>OVERHEAD TRACKER &mdash; SETUP</h2>"
     "<form method='POST' action='/save'>"
-    "<label>WI-FI NETWORK</label>"
-    "<input name='ssid' value='%s'>"
-    "<label>WI-FI PASSWORD</label>"
-    "<input name='pass' type='password'>"
-    "<label>LOCATION NAME</label>"
-    "<input name='name' value='%s'>"
-    "<label>LATITUDE</label>"
-    "<input name='lat' type='number' step='0.0001' value='%s'>"
-    "<label>LONGITUDE</label>"
-    "<input name='lon' type='number' step='0.0001' value='%s'>"
+    "<b>WI-FI NETWORK</b>"
+    "<input name='ssid' placeholder='Network name' value='%s'>"
+    "<b>WI-FI PASSWORD</b>"
+    "<input name='pass' type='password' placeholder='Password'>"
+    "<b>LOCATION</b>"
+    "<input name='query' placeholder='e.g. Russell Lea, Sydney Airport' value='%s'>"
     "<button type='submit'>SAVE &amp; REBOOT</button>"
     "</form></body></html>",
-    WIFI_SSID, LOCATION_NAME, latBuf, lonBuf);
+    WIFI_SSID, locDefault);
   setupServer.send(200, "text/html", page);
 }
 
 void handleSetupSave() {
-  String ssid = setupServer.arg("ssid");
-  String pass = setupServer.arg("pass");
-  String name = setupServer.arg("name");
-  float  lat  = setupServer.arg("lat").toFloat();
-  float  lon  = setupServer.arg("lon").toFloat();
-  ssid.trim(); name.trim(); name.toUpperCase();
-  saveWiFiConfig(ssid.c_str(), pass.c_str(), lat, lon, name.c_str());
+  String ssid  = setupServer.arg("ssid");
+  String pass  = setupServer.arg("pass");
+  String query = setupServer.arg("query");
+  ssid.trim(); query.trim();
+  saveWiFiConfig(ssid.c_str(), pass.c_str(), query.c_str());
   setupServer.send(200, "text/html",
     "<html><body style='background:#041010;color:#fd0;"
     "font-family:monospace;padding:20px'>"
@@ -1525,6 +1594,71 @@ void setup() {
         }
       }
       delay(50);
+    }
+  }
+
+  // ── Geocode location name if needed ─────────────────
+  if (needsGeocode && HOME_QUERY[0]) {
+    tft.fillScreen(C_BG);
+    tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+    tft.setTextColor(C_BG, C_AMBER);
+    tft.setTextSize(2);
+    tft.setCursor(8, 6);
+    tft.print("OVERHEAD TRACKER");
+    tft.setTextColor(C_AMBER, C_BG);
+    tft.setTextSize(2);
+    tft.setCursor(16, 60);
+    tft.print("LOCATING...");
+    tft.setTextColor(C_DIM, C_BG);
+    tft.setTextSize(1);
+    tft.setCursor(16, 90);
+    tft.print(HOME_QUERY);
+
+    if (!geocodeLocation(HOME_QUERY)) {
+      // Geocode failed — show error with RECONFIGURE option
+      tft.fillScreen(C_BG);
+      tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+      tft.setTextColor(C_BG, C_AMBER);
+      tft.setTextSize(2);
+      tft.setCursor(8, 6);
+      tft.print("OVERHEAD TRACKER");
+      tft.setTextColor(C_RED, C_BG);
+      tft.setTextSize(2);
+      tft.setCursor(16, 60);
+      tft.print("LOCATION NOT FOUND");
+      tft.setTextColor(C_DIM, C_BG);
+      tft.setTextSize(1);
+      tft.setCursor(16, 90);
+      tft.print(HOME_QUERY);
+      tft.fillRect(16, 120, 200, 44, C_DIMMER);
+      tft.setTextColor(C_AMBER, C_DIMMER);
+      tft.setTextSize(1);
+      tft.setCursor(28, 132);
+      tft.print("RECONFIGURE");
+      tft.setCursor(28, 146);
+      tft.print("Change WiFi/location");
+      tft.fillRect(260, 120, 200, 44, C_DIMMER);
+      tft.setTextColor(C_AMBER, C_DIMMER);
+      tft.setCursor(272, 132);
+      tft.print("CONTINUE");
+      tft.setCursor(272, 146);
+      tft.print("Use default location");
+      while (true) {
+        if (touchReady) {
+          uint16_t tx, ty;
+          if (tft.getTouch(&tx, &ty)) {
+            if (ty >= 120 && ty <= 164) {
+              if (tx >= 16 && tx <= 216) {
+                Preferences p; p.begin("tracker", false); p.remove("wifi_ssid"); p.end();
+                startCaptivePortal();
+              } else if (tx >= 260) {
+                break;  // continue with hardcoded defaults
+              }
+            }
+          }
+        }
+        delay(50);
+      }
     }
   }
 
