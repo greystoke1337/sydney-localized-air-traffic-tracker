@@ -97,6 +97,9 @@ uint32_t lastTouchMs     = 0;
 // Geofence preset button zone in header
 #define  GEO_BTN_X1  378
 #define  GEO_BTN_X2  432
+// CFG button zone in header (far right — tap to open captive portal)
+#define  CFG_BTN_X1  434
+#define  CFG_BTN_X2  476
 
 // ─── Flight status ────────────────────────────────────
 enum FlightStatus {
@@ -752,18 +755,17 @@ void drawHeader(bool fetching = false) {
   tft.setCursor(geoPillX, 10);
   tft.print(geoLabel);
 
-  // ── Source pill (right edge) ──
-  const char* src = fetching      ? "UPDATING" :
-                    dataSource==2 ? "CACHED"   :
-                    dataSource==1 ? "DIRECT"   : "PROXY";
+  // ── CFG pill (far right, tappable — opens captive portal) ──
+  // Source is already shown in the footer status bar.
+  uint16_t cfgBg     = fetching ? C_RED : C_DIMMER;
+  const char* cfgLbl = fetching ? "..." : "CFG";
+  int cfgLblW = strlen(cfgLbl) * 6 + 8;
+  int cfgPillX = (CFG_BTN_X1 + CFG_BTN_X2) / 2 - cfgLblW / 2;
+  tft.fillRect(CFG_BTN_X1, 4, CFG_BTN_X2 - CFG_BTN_X1, 20, cfgBg);
+  tft.setTextColor(C_AMBER, cfgBg);
   tft.setTextSize(1);
-  uint16_t pillBg = fetching ? C_RED : C_DIMMER;
-  int tagW = strlen(src) * 6 + 8;
-  int tagX = W - tagW - 6;
-  tft.fillRect(tagX, 7, tagW, 14, pillBg);
-  tft.setTextColor(C_AMBER, pillBg);
-  tft.setCursor(tagX + 4, 10);
-  tft.print(src);
+  tft.setCursor(cfgPillX, 10);
+  tft.print(cfgLbl);
 }
 
 // ── Footer bar ─────────────────────────────────────────
@@ -828,6 +830,13 @@ void handleTouch(uint16_t tx, uint16_t ty) {
       fetchFlights();
       countdown = REFRESH_SECS;
       lastCycle  = millis();
+    }
+  }
+
+  // CFG tap — open captive portal to change WiFi/location
+  if (tx >= CFG_BTN_X1 && tx <= CFG_BTN_X2 && ty < HDR_H) {
+    if (!isFetching) {
+      startCaptivePortal();  // switches to AP mode and blocks until form saved + reboot
     }
   }
 }
