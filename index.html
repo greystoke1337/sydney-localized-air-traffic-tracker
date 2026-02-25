@@ -1196,7 +1196,7 @@
         routeCache.set(callsign, route);
         return route;
       } catch(e) {
-        routeCache.set(callsign, null);
+        // Network / transient error — don't cache; allow retry on next render
         return null;
       }
     }
@@ -1228,7 +1228,8 @@
       if (!call || call === '---') flags.push('★ NO CALLSIGN (ANON)');
       // Private registration pattern (VH-Oxx = Qantas fleet, but VH-Xxx = private)
       const reg = (f.r || '').toUpperCase();
-      if (reg && !call.match(/^[A-Z]{3}\d/)) flags.push('★ PRIVATE / CHARTER');
+      const isMilitary = MILITARY_PREFIXES.some(p => call.startsWith(p)) || MILITARY_TYPES.includes(t);
+      if (reg && !call.match(/^[A-Z]{3}\d/) && !isMilitary) flags.push('★ PRIVATE / CHARTER');
       // Bizjet types
       if (['GL5T','GLEX','GLF6','GLF5','GLF4','FA7X','FA8X','C25A','C25B','C56X','C750'].includes(t)) {
         flags.push('★ BIZJET: ' + (AIRCRAFT_TYPE_DB[t] || t));
@@ -1323,9 +1324,9 @@
       const ctr     = '[' + (flightIndex+1) + '/' + flights.length + ']';
       const distLoc = haversineKm(locationLat, locationLon, f.lat, f.lon);
       const altStr  = formatAlt(f.alt_baro);
-      const spd     = f.gs        ? Math.round(f.gs) + ' KT' : '---';
-      const vs      = f.baro_rate ? (f.baro_rate > 0 ? '+' : '') + f.baro_rate + ' FPM' : '---';
-      const hdg     = f.track     ? Math.round(f.track) + '°' : '---';
+      const spd     = f.gs        != null ? Math.round(f.gs) + ' KT' : '---';
+      const vs      = f.baro_rate != null ? (f.baro_rate > 0 ? '+' : '') + f.baro_rate + ' FPM' : '---';
+      const hdg     = f.track     != null ? Math.round(f.track) + '°' : '---';
       const call    = (f.flight || '---').trim().toUpperCase();
       const typeStr = formatType(f.t, f.category);
       const reg     = (f.r || '---').toUpperCase();
@@ -1573,7 +1574,7 @@
         const data = await res.json();
         let ac = (data.ac || []).filter(f =>
           typeof f.alt_baro === 'number' && f.alt_baro >= altFloorFt &&
-          f.lat && f.lon &&
+          typeof f.lat === 'number' && typeof f.lon === 'number' &&
           haversineKm(locationLat, locationLon, f.lat, f.lon) <= geofenceKm
         );
         ac.sort((a, b) =>
@@ -1589,9 +1590,12 @@
           updateAltBar(null);
           return;
         }
-        flights = ac; flightIndex = 0;
+        const prevHex = flights[flightIndex]?.hex;
+        flights = ac;
+        const restored = prevHex ? ac.findIndex(f => f.hex === prevHex) : -1;
+        flightIndex = restored >= 0 ? restored : 0;
         checkEmergencySquawks();
-        render(flights[0]);
+        render(flights[flightIndex]);
         updateStats(flights);
       } catch(e) {
         if (e.name === 'AbortError') return;
