@@ -1381,7 +1381,6 @@ void setup() {
   } else {
     Serial.println("SD card not found — continuing without");
   }
-  applyLocation(locIndex);
   initTouch();
 
   // Load WiFi credentials and geofence from NVS; enter portal on first boot
