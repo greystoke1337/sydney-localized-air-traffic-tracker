@@ -72,15 +72,6 @@ bool  needsGeocode      = false;
 // ─── SD state ─────────────────────────────────────────
 bool sdAvailable = false;
 
-// ─── Location presets ─────────────────────────────────
-struct LocPreset { const char* name; float lat; float lon; };
-const LocPreset LOC_PRESETS[] = {
-  {"RUSSELL LEA", -33.8598f, 151.1369f},
-  {"SYDNEY ARPT", -33.9461f, 151.1772f},
-};
-const int LOC_COUNT = sizeof(LOC_PRESETS) / sizeof(LOC_PRESETS[0]);
-int locIndex = 0;
-
 // ─── Geofence presets ─────────────────────────────────
 const float GEO_PRESETS[] = {5.0f, 10.0f, 50.0f};
 const int   GEO_COUNT     = 3;
@@ -91,9 +82,6 @@ uint16_t touchCalData[5] = {0};
 bool     touchReady      = false;
 uint32_t lastTouchMs     = 0;
 #define  TOUCH_DEBOUNCE_MS  700
-// Location button zone in header (x range, full header height)
-#define  LOC_BTN_X1  215
-#define  LOC_BTN_X2  375
 // Geofence preset button zone in header
 #define  GEO_BTN_X1  378
 #define  GEO_BTN_X2  432
@@ -154,12 +142,6 @@ bool alreadyLogged(const char* cs) {
   for (int i = 0; i < loggedCount; i++)
     if (strcmp(loggedCallsigns[i], cs) == 0) return true;
   return false;
-}
-
-void applyLocation(int idx) {
-  HOME_LAT = LOC_PRESETS[idx].lat;
-  HOME_LON = LOC_PRESETS[idx].lon;
-  strlcpy(LOCATION_NAME, LOC_PRESETS[idx].name, sizeof(LOCATION_NAME));
 }
 
 // ─── Airline lookup ───────────────────────────────────
@@ -733,16 +715,13 @@ void drawHeader(bool fetching = false) {
   tft.setCursor(8, 6);
   tft.print("OVERHEAD TRACKER");
 
-  // ── Location toggle pill (centre of header, tappable) ──
-  char locLabel[24];
-  snprintf(locLabel, sizeof(locLabel), "< %s >", LOC_PRESETS[locIndex].name);
-  int locW    = strlen(locLabel) * 6 + 8;
-  int locPillX = (LOC_BTN_X1 + LOC_BTN_X2) / 2 - locW / 2;
-  tft.fillRect(LOC_BTN_X1, 4, LOC_BTN_X2 - LOC_BTN_X1, 20, C_DIMMER);
-  tft.setTextColor(C_AMBER, C_DIMMER);
+  // ── Location label (static, configured via captive portal) ──
+  int locW    = strlen(LOCATION_NAME) * 6;
+  int locLabelX = 215 + (160 - locW) / 2;
+  tft.setTextColor(C_BG, C_AMBER);
   tft.setTextSize(1);
-  tft.setCursor(locPillX, 10);
-  tft.print(locLabel);
+  tft.setCursor(locLabelX, 10);
+  tft.print(LOCATION_NAME);
 
   // ── Geofence preset pill ──
   const char* geoLabels[] = {"5K", "10K", "50K"};
@@ -802,20 +781,6 @@ void handleTouch(uint16_t tx, uint16_t ty) {
   uint32_t now = millis();
   if (now - lastTouchMs < TOUCH_DEBOUNCE_MS) return;
   lastTouchMs = now;
-
-  // Location toggle — tap anywhere in the pill zone in the header
-  if (tx >= LOC_BTN_X1 && tx <= LOC_BTN_X2 && ty < HDR_H) {
-    locIndex = (locIndex + 1) % LOC_COUNT;
-    applyLocation(locIndex);
-    flightCount = 0;
-    flightIndex = 0;
-    Serial.printf("Location: %s (%.4f, %.4f)\n", LOCATION_NAME, HOME_LAT, HOME_LON);
-    if (!isFetching) {
-      fetchFlights();
-      countdown = REFRESH_SECS;
-      lastCycle  = millis();
-    }
-  }
 
   // Geofence preset cycle — tap the geo pill in the header
   if (tx >= GEO_BTN_X1 && tx <= GEO_BTN_X2 && ty < HDR_H) {
