@@ -18,12 +18,16 @@
 #include <math.h>
 #include <Preferences.h>
 #include <time.h>
+#include <WebServer.h>
+#include <DNSServer.h>
 
-TFT_eSPI tft = TFT_eSPI();
+TFT_eSPI   tft = TFT_eSPI();
+WebServer  setupServer(80);
+DNSServer  dnsServer;
 
-// ─── WiFi ─────────────────────────────────────────────
-const char* WIFI_SSID = "chartreuse";
-const char* WIFI_PASS = "checkmate1989";
+// ─── WiFi (loaded from NVS on boot; defaults used on first flash) ─────────
+char WIFI_SSID[64] = "chartreuse";
+char WIFI_PASS[64] = "checkmate1989";
 
 // ─── Proxy ────────────────────────────────────────────
 const char* PROXY_HOST = "192.168.86.24";
@@ -75,14 +79,22 @@ const LocPreset LOC_PRESETS[] = {
 const int LOC_COUNT = sizeof(LOC_PRESETS) / sizeof(LOC_PRESETS[0]);
 int locIndex = 0;
 
+// ─── Geofence presets ─────────────────────────────────
+const float GEO_PRESETS[] = {5.0f, 10.0f, 50.0f};
+const int   GEO_COUNT     = 3;
+int         geoIndex      = 1;  // default: 10km
+
 // ─── Touch ────────────────────────────────────────────
 uint16_t touchCalData[5] = {0};
 bool     touchReady      = false;
 uint32_t lastTouchMs     = 0;
 #define  TOUCH_DEBOUNCE_MS  700
 // Location button zone in header (x range, full header height)
-#define  LOC_BTN_X1  195
-#define  LOC_BTN_X2  355
+#define  LOC_BTN_X1  215
+#define  LOC_BTN_X2  375
+// Geofence preset button zone in header
+#define  GEO_BTN_X1  378
+#define  GEO_BTN_X2  432
 
 // ─── Flight status ────────────────────────────────────
 enum FlightStatus {
@@ -484,6 +496,161 @@ void initTouch() {
   Serial.println("Touch calibrated and saved.");
 }
 
+// ─── NVS: WiFi + location + geofence config ───────────
+bool loadWiFiConfig() {
+  Preferences p;
+  p.begin("tracker", true);
+  if (!p.isKey("wifi_ssid")) { p.end(); return false; }
+  strlcpy(WIFI_SSID, p.getString("wifi_ssid", "").c_str(), sizeof(WIFI_SSID));
+  strlcpy(WIFI_PASS, p.getString("wifi_pass", "").c_str(), sizeof(WIFI_PASS));
+  HOME_LAT = p.getFloat("home_lat", HOME_LAT);
+  HOME_LON = p.getFloat("home_lon", HOME_LON);
+  String name = p.getString("home_name", "");
+  if (name.length() > 0) {
+    name.toUpperCase();
+    strlcpy(LOCATION_NAME, name.c_str(), sizeof(LOCATION_NAME));
+  }
+  geoIndex = p.getInt("gfence_idx", 1);
+  if (geoIndex < 0 || geoIndex >= GEO_COUNT) geoIndex = 1;
+  GEOFENCE_KM = GEO_PRESETS[geoIndex];
+  p.end();
+  return true;
+}
+
+void saveWiFiConfig(const char* ssid, const char* pass,
+                    float lat, float lon, const char* name) {
+  Preferences p;
+  p.begin("tracker", false);
+  p.putString("wifi_ssid", ssid);
+  p.putString("wifi_pass", pass);
+  p.putFloat("home_lat",  lat);
+  p.putFloat("home_lon",  lon);
+  p.putString("home_name", name);
+  p.end();
+}
+
+void saveGeoIndex() {
+  Preferences p;
+  p.begin("tracker", false);
+  p.putInt("gfence_idx", geoIndex);
+  p.end();
+}
+
+// ─── Captive portal ───────────────────────────────────
+
+void handleSetupRoot() {
+  char latBuf[14], lonBuf[14];
+  dtostrf(HOME_LAT, 9, 4, latBuf);
+  dtostrf(HOME_LON, 10, 4, lonBuf);
+  // Build page with snprintf — %% becomes % in output
+  char page[3200];
+  snprintf(page, sizeof(page),
+    "<!DOCTYPE html><html><head>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>OVERHEAD TRACKER SETUP</title>"
+    "<style>"
+    "body{background:#041010;color:#fd0;font-family:monospace;padding:20px;max-width:480px;margin:auto}"
+    "h1{color:#fd0;font-size:1.1em;letter-spacing:2px;border-bottom:1px solid #3900;padding-bottom:8px;margin-bottom:0}"
+    "label{display:block;margin:16px 0 4px;color:#7940;font-size:.8em;letter-spacing:1px}"
+    "input{width:100%%;box-sizing:border-box;background:#0d1f1f;border:1px solid #3900;"
+    "color:#fd0;padding:10px;font-family:monospace;font-size:1em}"
+    "input:focus{outline:none;border-color:#fd0}"
+    "button{width:100%%;margin-top:24px;padding:14px;background:#fd0;color:#041010;"
+    "border:none;font-family:monospace;font-size:1em;letter-spacing:2px;font-weight:bold}"
+    "</style></head><body>"
+    "<h1>OVERHEAD TRACKER &mdash; SETUP</h1>"
+    "<form method='POST' action='/save'>"
+    "<label>WI-FI NETWORK</label>"
+    "<input name='ssid' value='%s'>"
+    "<label>WI-FI PASSWORD</label>"
+    "<input name='pass' type='password'>"
+    "<label>LOCATION NAME</label>"
+    "<input name='name' value='%s'>"
+    "<label>LATITUDE</label>"
+    "<input name='lat' type='number' step='0.0001' value='%s'>"
+    "<label>LONGITUDE</label>"
+    "<input name='lon' type='number' step='0.0001' value='%s'>"
+    "<button type='submit'>SAVE &amp; REBOOT</button>"
+    "</form></body></html>",
+    WIFI_SSID, LOCATION_NAME, latBuf, lonBuf);
+  setupServer.send(200, "text/html", page);
+}
+
+void handleSetupSave() {
+  String ssid = setupServer.arg("ssid");
+  String pass = setupServer.arg("pass");
+  String name = setupServer.arg("name");
+  float  lat  = setupServer.arg("lat").toFloat();
+  float  lon  = setupServer.arg("lon").toFloat();
+  ssid.trim(); name.trim(); name.toUpperCase();
+  saveWiFiConfig(ssid.c_str(), pass.c_str(), lat, lon, name.c_str());
+  setupServer.send(200, "text/html",
+    "<html><body style='background:#041010;color:#fd0;"
+    "font-family:monospace;padding:20px'>"
+    "<h2 style='color:#07e0'>SAVED</h2>"
+    "<p>REBOOTING NOW...</p></body></html>");
+  delay(1500);
+  ESP.restart();
+}
+
+void startCaptivePortal() {
+  // TFT setup screen
+  tft.fillScreen(C_BG);
+  tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+  tft.setTextColor(C_BG, C_AMBER);
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print("OVERHEAD TRACKER");
+
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setTextSize(2);
+  tft.setCursor(16, 50);
+  tft.print("SETUP MODE");
+
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setTextSize(1);
+  tft.setCursor(16, 86);
+  tft.print("ON YOUR PHONE:");
+  tft.setCursor(16, 104);
+  tft.print("1. CONNECT TO WI-FI:");
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(28, 120);
+  tft.print("OVERHEAD-SETUP");
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(16, 144);
+  tft.print("2. OPEN ANY BROWSER");
+  tft.setCursor(28, 160);
+  tft.print("(PAGE OPENS AUTOMATICALLY)");
+  tft.setTextColor(C_DIMMER, C_BG);
+  tft.setCursor(28, 180);
+  tft.print("OR: 192.168.4.1");
+
+  // Start AP
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("OVERHEAD-SETUP");
+  delay(100);
+
+  // DNS redirect — all queries → 192.168.4.1 (captive portal)
+  dnsServer.start(53, "*", WiFi.softAPIP());
+
+  // Web server routes
+  setupServer.on("/", HTTP_GET, handleSetupRoot);
+  setupServer.on("/save", HTTP_POST, handleSetupSave);
+  // Captive portal detection endpoints (iOS, Android, Windows auto-popup)
+  setupServer.onNotFound([]() {
+    setupServer.sendHeader("Location", "http://192.168.4.1/");
+    setupServer.send(302, "text/plain", "");
+  });
+  setupServer.begin();
+  Serial.println("Captive portal active — AP: OVERHEAD-SETUP");
+
+  // Block until form submitted (handleSetupSave restarts the device)
+  while (true) {
+    dnsServer.processNextRequest();
+    setupServer.handleClient();
+  }
+}
+
 // ─── Drawing ──────────────────────────────────────────
 
 // ── Header bar ─────────────────────────────────────────
@@ -504,6 +671,17 @@ void drawHeader(bool fetching = false) {
   tft.setTextSize(1);
   tft.setCursor(locPillX, 10);
   tft.print(locLabel);
+
+  // ── Geofence preset pill ──
+  const char* geoLabels[] = {"5K", "10K", "50K"};
+  const char* geoLabel = geoLabels[geoIndex];
+  int geoLabelW = strlen(geoLabel) * 6 + 8;
+  int geoPillX  = (GEO_BTN_X1 + GEO_BTN_X2) / 2 - geoLabelW / 2;
+  tft.fillRect(GEO_BTN_X1, 4, GEO_BTN_X2 - GEO_BTN_X1, 20, C_DIMMER);
+  tft.setTextColor(C_AMBER, C_DIMMER);
+  tft.setTextSize(1);
+  tft.setCursor(geoPillX, 10);
+  tft.print(geoLabel);
 
   // ── Source pill (right edge) ──
   const char* src = fetching      ? "UPDATING" :
@@ -562,6 +740,22 @@ void handleTouch(uint16_t tx, uint16_t ty) {
     flightIndex = 0;
     Serial.printf("Location: %s (%.4f, %.4f)\n", LOCATION_NAME, HOME_LAT, HOME_LON);
     if (!isFetching) {
+      fetchFlights();
+      countdown = REFRESH_SECS;
+      lastCycle  = millis();
+    }
+  }
+
+  // Geofence preset cycle — tap the geo pill in the header
+  if (tx >= GEO_BTN_X1 && tx <= GEO_BTN_X2 && ty < HDR_H) {
+    geoIndex = (geoIndex + 1) % GEO_COUNT;
+    GEOFENCE_KM = GEO_PRESETS[geoIndex];
+    saveGeoIndex();
+    Serial.printf("Geofence: %.0f km\n", GEOFENCE_KM);
+    drawHeader(isFetching);
+    if (!isFetching) {
+      flightCount = 0;
+      flightIndex = 0;
       fetchFlights();
       countdown = REFRESH_SECS;
       lastCycle  = millis();
@@ -1147,6 +1341,11 @@ void setup() {
   applyLocation(locIndex);
   initTouch();
 
+  // Load WiFi credentials and geofence from NVS; enter portal on first boot
+  if (!loadWiFiConfig()) {
+    startCaptivePortal();  // blocks until saved; restarts device
+  }
+
   // ── Animated WiFi connection screen ──────────────────
   // Draws a scanning bar, dot progress, and attempt counter.
   // Everything is drawn inside the wait loop so it animates live.
@@ -1273,8 +1472,60 @@ void setup() {
         return;
       }
     }
-    renderMessage("WIFI FAILED", "CHECK CREDENTIALS");
-    while (true) delay(1000);
+    // WiFi failed — show RECONFIGURE / RETRY options
+    tft.fillScreen(C_BG);
+    tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+    tft.setTextColor(C_BG, C_AMBER);
+    tft.setTextSize(2);
+    tft.setCursor(8, 6);
+    tft.print("OVERHEAD TRACKER");
+    tft.setTextColor(C_RED, C_BG);
+    tft.setTextSize(2);
+    tft.setCursor(16, 58);
+    tft.print("WIFI FAILED");
+    tft.setTextColor(C_DIM, C_BG);
+    tft.setTextSize(1);
+    tft.setCursor(16, 88);
+    tft.print("Could not connect to: ");
+    tft.setTextColor(C_AMBER, C_BG);
+    tft.print(WIFI_SSID);
+    // RECONFIGURE button (left)
+    tft.fillRect(16, 112, 200, 44, C_DIMMER);
+    tft.setTextColor(C_AMBER, C_DIMMER);
+    tft.setTextSize(1);
+    tft.setCursor(28, 124);
+    tft.print("RECONFIGURE");
+    tft.setCursor(28, 138);
+    tft.print("Change WiFi/location");
+    // RETRY button (right)
+    tft.fillRect(260, 112, 200, 44, C_DIMMER);
+    tft.setTextColor(C_AMBER, C_DIMMER);
+    tft.setTextSize(1);
+    tft.setCursor(272, 124);
+    tft.print("RETRY");
+    tft.setCursor(272, 138);
+    tft.print("Reboot and try again");
+    // Wait for tap
+    while (true) {
+      if (touchReady) {
+        uint16_t tx, ty;
+        if (tft.getTouch(&tx, &ty)) {
+          if (ty >= 112 && ty <= 156) {
+            if (tx >= 16 && tx <= 216) {
+              // RECONFIGURE: clear saved SSID so portal triggers on next boot
+              Preferences p;
+              p.begin("tracker", false);
+              p.remove("wifi_ssid");
+              p.end();
+              startCaptivePortal();
+            } else if (tx >= 260 && tx <= 460) {
+              ESP.restart();
+            }
+          }
+        }
+      }
+      delay(50);
+    }
   }
 
   fetchFlights();
