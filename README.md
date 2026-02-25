@@ -47,6 +47,44 @@ A real-time tracker that shows **which aircraft are flying directly above any lo
 
 ---
 
+## ESP32 Hardware Display
+
+A standalone physical tracker built on the **Freenove FNK0103S** (ESP32 + 4" 480×320 ST7796 touchscreen). It connects to your local network and displays live overhead flights on the TFT screen — no browser needed.
+
+**Hardware**
+- Freenove FNK0103S dev board (ESP32, HSPI)
+- 4.0" 480×320 ST7796 display (landscape)
+- Optional: 3D-printed enclosure (STL/STEP files in [`tracker_live_fnk0103s/enclosure/`](tracker_live_fnk0103s/enclosure/))
+
+**Features**
+- Polls the local proxy every 15 seconds; cycles through overhead flights every 8 seconds
+- **Touchscreen location toggle** — tap `< RUSSELL LEA >` / `< SYDNEY ARPT >` in the header to switch location presets instantly; switching clears the flight list and triggers a fresh fetch
+- Touchscreen calibration runs once on first boot and is saved to NVS
+- Displays flight phase, altitude, callsign, aircraft type, airline, and distance
+
+**Libraries required** (install via Arduino Library Manager)
+- `TFT_eSPI` (Freenove pre-configured version)
+- `ArduinoJson`
+- `SD` (built into Arduino ESP32 core)
+
+**Configuration**
+Edit the top of [`tracker_live_fnk0103s/tracker_live_fnk0103s.ino`](tracker_live_fnk0103s/tracker_live_fnk0103s.ino) before flashing:
+```cpp
+const char* WIFI_SSID = "your-network";
+const char* WIFI_PASS = "your-password";
+const char* PROXY_HOST = "192.168.x.x";  // IP of your local proxy
+```
+
+**Build & flash** (`arduino-cli` required)
+```bash
+./build.sh            # compile + auto-detect port + upload
+./build.sh compile    # compile only
+./build.sh upload     # upload last build (auto-detect port)
+./build.sh monitor    # open serial monitor
+```
+
+---
+
 ## How It Works
 
 1. Geocodes the entered location via Nominatim (OpenStreetMap) — no API key needed; works worldwide
@@ -99,6 +137,7 @@ open index.html
 - [x] Session flight log
 - [x] Share link via URL param
 - [x] Full aircraft type name database
+- [x] ESP32 TFT standalone hardware display
 - [ ] Airline logo display
 - [ ] Push notification when a specific flight appears overhead
 
