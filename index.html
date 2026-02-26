@@ -10,7 +10,7 @@
   APIs: airplanes.live (ADS-B), Nominatim/OSM (geocoding),
         Planespotters.net (photos), CartoDB (map tiles)
 -->
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -68,6 +68,7 @@
       padding-left: 10px;
       border-left: 3px solid var(--c-main);
       transition: border-color 0.5s, box-shadow 0.5s;
+      min-height: 120px;
     }
     #info-wrap.phase-landing    { border-color: #ff6060; box-shadow: -4px 0 12px rgba(255,96,96,0.3); }
     #info-wrap.phase-takeoff    { border-color: #60ff90; box-shadow: -4px 0 12px rgba(96,255,144,0.3); }
@@ -97,7 +98,7 @@
     .info-label {
       flex: 0 0 6.5em;           /* fixed column width — all values start here */
       font-size: 0.72em;
-      opacity: 0.45;
+      opacity: 0.65;
       letter-spacing: 0.04em;
       white-space: nowrap;
     }
@@ -177,9 +178,18 @@
     #log-section { margin-top: 10px; }
     #log-section summary { cursor: pointer; font-size: 0.78rem; opacity: 0.7; padding: 4px 0; list-style: none; user-select: none; -webkit-user-select: none; }
     #log-section summary::-webkit-details-marker { display: none; }
+    #log-section summary::before,
+    #stats-section summary::before {
+      content: '▶ ';
+      display: inline-block;
+      transition: transform 0.2s;
+    }
+    #log-section[open] > summary::before,
+    #stats-section[open] > summary::before { transform: rotate(90deg); }
     #log-list { margin-top: 6px; max-height: 180px; overflow-y: auto; border: 1px solid var(--c-dim); padding: 6px 8px; font-size: 0.68rem; line-height: 1.9; opacity: 0.8; }
     #log-list::-webkit-scrollbar { width: 4px; }
     #log-list::-webkit-scrollbar-thumb { background: var(--c-dim); }
+    #log-list { scrollbar-width: thin; scrollbar-color: var(--c-dim) transparent; }
     .log-entry { border-bottom: 1px solid rgba(255,166,0,0.1); padding: 1px 0; }
     .log-entry:last-child { border-bottom: none; }
 
@@ -261,7 +271,11 @@
       z-index: 999;
     }
     [data-tip]:hover::after,
-    [data-tip]:hover::before { opacity: 1; }
+    [data-tip]:hover::before,
+    [data-tip]:focus::after,
+    [data-tip]:focus::before,
+    [data-tip]:focus-within::after,
+    [data-tip]:focus-within::before { opacity: 1; }
 
     /* Tooltip anchored to the left edge on data items (avoids screen overflow) */
     .data-item[data-tip]::after { left: 0; transform: none; }
@@ -289,6 +303,7 @@
     /* ── Interesting flight badge ── */
     #interesting-badge {
       display: none;
+      min-height: 1.4em;
       margin: 4px 0;
       padding: 4px 8px;
       border: 1px solid #ffee44;
@@ -398,39 +413,51 @@
       0%, 100% { border-color: #ff2020; background: rgba(255,0,0,0.08); }
       50%       { border-color: #ff6060; background: rgba(255,0,0,0.18); }
     }
+
+    @media (prefers-reduced-motion: reduce) {
+      .blink { animation: none; opacity: 1; }
+      #info-wrap.fetching { animation: none; }
+      #fetch-dot.active { animation: none; opacity: 1; }
+      #emerg-banner { animation: none; }
+      #alt-bar-fill { transition: none; }
+      #info-wrap { transition: none; }
+      #log-section summary::before,
+      #stats-section summary::before { transition: none; }
+    }
   </style>
 </head>
 <body class="dotmatrix">
   <div class="classic-layout">
 
     <!-- Title: location-display updated by JS on each location change -->
-    <p>OVERHEAD // <span id="location-display">---</span><br>LIVE AIRCRAFT TRACKER ✈ <span class="blink">█</span><span id="fetch-dot"></span></p>
+    <p>OVERHEAD // <span id="location-display">---</span><br>LIVE AIRCRAFT TRACKER ✈︎ <span class="blink">█</span><span id="fetch-dot"></span></p>
     <hr>
 
     <!-- Location input: any city, suburb, or address worldwide -->
     <div id="location-ctrl">
-      <input id="location-input" value="" placeholder="City, suburb, address...">
+      <label for="location-input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;">Location</label>
+      <input id="location-input" value="" placeholder="City, suburb, address..." autocomplete="off">
       <button onclick="setLocation()">SET LOC</button>
     </div>
 
     <!-- GEOFENCE: search radius. Label updates live; API refreshes on next 15s cycle. -->
     <div class="slider-ctrl">
-      <span data-tip="Search radius around your location.&#10;Only aircraft within this circle are shown.&#10;Larger = more results but slower.">GEOFENCE</span>
-      <input type="range" id="geofence-slider" min="2" max="20" value="5" step="1">
+      <span id="geofence-lbl" data-tip="Search radius around your location.&#10;Only aircraft within this circle are shown.&#10;Larger = more results but slower.">GEOFENCE</span>
+      <input type="range" id="geofence-slider" min="2" max="20" value="5" step="1" aria-labelledby="geofence-lbl" aria-describedby="geofence-label">
       <span id="geofence-label">5 KM</span>
     </div>
 
     <!-- ALT FLOOR: hide aircraft below this altitude -->
     <div class="slider-ctrl">
-      <span data-tip="Hide aircraft below this altitude.&#10;Useful to filter out ground vehicles&#10;and very low-level traffic.">ALT FLOOR</span>
-      <input type="range" id="altfloor-slider" min="200" max="5000" value="500" step="100">
+      <span id="altfloor-lbl" data-tip="Hide aircraft below this altitude.&#10;Useful to filter out ground vehicles&#10;and very low-level traffic.">ALT FLOOR</span>
+      <input type="range" id="altfloor-slider" min="200" max="5000" value="500" step="100" aria-labelledby="altfloor-lbl" aria-describedby="altfloor-label">
       <span id="altfloor-label">500 FT</span>
     </div>
 
     <p id="error"></p>
 
     <!-- Emergency squawk banner — visible when any in-range flight squawks emergency -->
-    <div id="emerg-banner" onclick="dismissEmergency()"></div>
+    <div id="emerg-banner" role="alert" aria-live="assertive" aria-atomic="true" onclick="dismissEmergency()"></div>
 
     <!-- Flight info: left border + altitude bar + primary/secondary data -->
     <div id="info-wrap">
@@ -441,15 +468,15 @@
     <div id="interesting-badge"></div>
     <div id="intercept-wrap"></div>
     <div id="main-grid">
-      <div class="data-item" data-tip="Barometric altitude above sea level.&#10;Red=below 1000ft  Yellow=1000–10000ft&#10;Amber=normal  Blue=above 35000ft"><span class="data-label">ALT</span><span class="data-value" id="d-alt">---</span></div>
-      <div class="data-item" data-tip="Ground speed in knots.&#10;1 kt ≈ 1.85 km/h&#10;Dim=slow  Amber=normal  Blue=fast (500kt+)"><span class="data-label">SPEED</span><span class="data-value" id="d-spd">---</span></div>
-      <div class="data-item" data-tip="Vertical speed in feet per minute.&#10;Green = climbing&#10;Red = descending&#10;Amber = level flight"><span class="data-label">V/SPEED</span><span class="data-value" id="d-vs">---</span></div>
-      <div class="data-item" data-tip="Ground track heading in degrees.&#10;0°=North  90°=East&#10;180°=South  270°=West"><span class="data-label">GND TRK</span><span class="data-value" id="d-hdg">---</span></div>
-      <div class="data-item" data-tip="Straight-line distance from your&#10;set location to the aircraft.&#10;Orange = very close (under 3km)"><span class="data-label">DIST LOC</span><span class="data-value" id="d-dist">---</span></div>
-      <div class="data-item" data-tip="Transponder squawk code.&#10;7700 = Emergency (MAYDAY)&#10;7600 = Radio failure (NORDO)&#10;7500 = Hijack  1200 = VFR"><span class="data-label">SQUAWK</span><span class="data-value" id="d-sqk">---</span></div>
+      <div class="data-item" tabindex="0" data-tip="Barometric altitude above sea level.&#10;Red=below 1000ft  Yellow=1000–10000ft&#10;Amber=normal  Blue=above 35000ft"><span class="data-label">ALT</span><span class="data-value" id="d-alt">---</span></div>
+      <div class="data-item" tabindex="0" data-tip="Ground speed in knots.&#10;1 kt ≈ 1.85 km/h&#10;Dim=slow  Amber=normal  Blue=fast (500kt+)"><span class="data-label">SPEED</span><span class="data-value" id="d-spd">---</span></div>
+      <div class="data-item" tabindex="0" data-tip="Vertical speed in feet per minute.&#10;Green = climbing&#10;Red = descending&#10;Amber = level flight"><span class="data-label">V/SPEED</span><span class="data-value" id="d-vs">---</span></div>
+      <div class="data-item" tabindex="0" data-tip="Ground track heading in degrees.&#10;0°=North  90°=East&#10;180°=South  270°=West"><span class="data-label">GND TRK</span><span class="data-value" id="d-hdg">---</span></div>
+      <div class="data-item" tabindex="0" data-tip="Straight-line distance from your&#10;set location to the aircraft.&#10;Orange = very close (under 3km)"><span class="data-label">DIST LOC</span><span class="data-value" id="d-dist">---</span></div>
+      <div class="data-item" tabindex="0" data-tip="Transponder squawk code.&#10;7700 = Emergency (MAYDAY)&#10;7600 = Radio failure (NORDO)&#10;7500 = Hijack  1200 = VFR"><span class="data-label">SQUAWK</span><span class="data-value" id="d-sqk">---</span></div>
     </div>
 
-    <div id="dm-map"></div>
+    <div id="dm-map" role="application" aria-label="Live flight map"></div>
 
     <!-- Aircraft photo — hidden until a photo is found -->
     <div class="photo-wrap" id="photo-wrap" style="display:none">
@@ -461,19 +488,19 @@
 
     <!-- PREV/NEXT: browse flights | NEAREST: jump to closest | SND: ping toggle | SHARE: copy URL -->
     <div id="btn-row">
-      <button onclick="prev()" data-tip="Show previous aircraft&#10;in the list (sorted by&#10;distance from you)">&#9664; PREV</button>
-      <button onclick="next()" data-tip="Show next aircraft&#10;in the list (sorted by&#10;distance from you)">NEXT &#9654;</button>
-      <button onclick="go(0)" data-tip="Jump to the closest&#10;aircraft to your location">NEAREST</button>
+      <button onclick="prev()" aria-label="Previous aircraft" data-tip="Show previous aircraft&#10;in the list (sorted by&#10;distance from you)">&#9664; PREV</button>
+      <button onclick="next()" aria-label="Next aircraft" data-tip="Show next aircraft&#10;in the list (sorted by&#10;distance from you)">NEXT &#9654;</button>
+      <button onclick="go(0)" aria-label="Jump to nearest aircraft" data-tip="Jump to the closest&#10;aircraft to your location">NEAREST</button>
       <button onclick="manualRefresh()" data-tip="Force a data refresh&#10;(auto-refreshes every 15s)">REFRESH</button>
-      <button onclick="toggleSound()" id="sound-btn" data-tip="Toggle radar ping sound&#10;when a new closest aircraft&#10;is detected">🔇 SND</button>
+      <button onclick="toggleSound()" id="sound-btn" data-tip="Toggle radar ping sound&#10;when a new closest aircraft&#10;is detected">[OFF] SND</button>
       <button onclick="shareUrl()" data-tip="Copy a shareable link&#10;with your current location&#10;pre-filled">&#x2197; SHARE</button>
       <button onclick="showKbdHelp()" data-tip="Show keyboard shortcuts">? HELP</button>
     </div>
 
     <!-- Keyboard shortcut overlay -->
-    <div id="kbd-overlay" onclick="hideKbdHelp()">
-      <div id="kbd-panel" onclick="event.stopPropagation()">
-        <h3>⌨ KEYBOARD SHORTCUTS</h3>
+    <div id="kbd-overlay" aria-hidden="true" onclick="hideKbdHelp()">
+      <div id="kbd-panel" role="dialog" aria-modal="true" aria-labelledby="kbd-panel-title" onclick="event.stopPropagation()">
+        <h3 id="kbd-panel-title">⌨ KEYBOARD SHORTCUTS</h3>
         <div class="kbd-row"><span class="kbd-key">←</span><span class="kbd-desc">Previous aircraft</span></div>
         <div class="kbd-row"><span class="kbd-key">→</span><span class="kbd-desc">Next aircraft</span></div>
         <div class="kbd-row"><span class="kbd-key">Home</span><span class="kbd-desc">Jump to nearest</span></div>
@@ -494,13 +521,13 @@
 
     <!-- Session log: collapsible, populated by JS, newest entries first -->
     <details id="log-section">
-      <summary>▶ SESSION LOG (<span id="log-count">0</span> FLIGHTS)</summary>
+      <summary>SESSION LOG (<span id="log-count" aria-live="polite">0</span> FLIGHTS)</summary>
       <div id="log-list"><span style="opacity:0.4">No flights recorded yet.</span></div>
     </details>
 
     <!-- Statistics panel: collapsible, updated on each fetch -->
     <details id="stats-section">
-      <summary>▶ SESSION STATS</summary>
+      <summary>SESSION STATS</summary>
       <div id="stats-panel">
         <span id="stats-empty">No data yet — stats build up as flights are tracked.</span>
         <div id="stats-content" style="display:none">
@@ -808,7 +835,7 @@
     function toggleSound() {
       soundOn = !soundOn;
       const btn = document.getElementById('sound-btn');
-      btn.textContent = soundOn ? '🔊 SND' : '🔇 SND';
+      btn.textContent = soundOn ? '[ON] SND' : '[OFF] SND';
       btn.classList.toggle('active', soundOn);
       if (soundOn && !audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
@@ -1308,8 +1335,27 @@
 
 
     // ── Keyboard help overlay ────────────────────────────────────────
-    function showKbdHelp() { document.getElementById('kbd-overlay').classList.add('visible'); }
-    function hideKbdHelp() { document.getElementById('kbd-overlay').classList.remove('visible'); }
+    function showKbdHelp() {
+      const overlay = document.getElementById('kbd-overlay');
+      overlay.classList.add('visible');
+      overlay.setAttribute('aria-hidden', 'false');
+      document.getElementById('kbd-close').focus();
+    }
+    function hideKbdHelp() {
+      const overlay = document.getElementById('kbd-overlay');
+      overlay.classList.remove('visible');
+      overlay.setAttribute('aria-hidden', 'true');
+      document.querySelector('button[onclick="showKbdHelp()"]').focus();
+    }
+    // Focus trap inside the keyboard help panel
+    document.getElementById('kbd-panel').addEventListener('keydown', function(e) {
+      if (e.key !== 'Tab') return;
+      const focusable = Array.from(this.querySelectorAll('button, [href], input, [tabindex]:not([tabindex="-1"])'));
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+      else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
+    });
 
 
     // ── Render ───────────────────────────────────────────────────────
@@ -1462,18 +1508,22 @@
         if (!photo) return;
         const src    = photo.thumbnail_large?.src || photo.thumbnail?.src;
         const credit = photo.photographer ? '© ' + photo.photographer : '';
-        if (src) setPhoto(src, credit);
+        if (src) setPhoto(src, credit, reg, type);
       } catch(e) {}
     }
 
-    function setPhoto(src, credit) {
+    function setPhoto(src, credit, reg, typeStr) {
+      const desc = [typeStr, reg].filter(Boolean).join(' ') || 'Aircraft';
       document.getElementById('dm-photo').src = src;
+      document.getElementById('dm-photo').alt = desc;
       document.getElementById('photo-wrap').style.display = 'block';
       document.getElementById('dm-photo-credit').textContent = credit;
     }
     function clearPhoto() {
       document.getElementById('dm-photo').src = '';
+      document.getElementById('dm-photo').alt = '';
       document.getElementById('photo-wrap').style.display = 'none';
+      document.getElementById('dm-photo-credit').textContent = '';
     }
 
 
@@ -1559,7 +1609,7 @@
             : signal;
           res = await fetch(buildUrl(PROXY_URL), { signal: proxySignal });
           if (!res.ok) throw new Error('proxy HTTP ' + res.status);
-          document.getElementById('proxy-status').textContent = '🟢 VIA PROXY';
+          document.getElementById('proxy-status').textContent = '[OK] VIA PROXY';
         } catch(proxyErr) {
           if (proxyErr.name === 'AbortError' && !signal.aborted) {
             // Timeout hit — fall through to direct
@@ -1567,7 +1617,7 @@
             throw proxyErr; // manual abort, don't fall back
           }
           console.warn('Proxy failed, falling back to airplanes.live:', proxyErr.message);
-          document.getElementById('proxy-status').textContent = '🔴 DIRECT (PROXY DOWN)';
+          document.getElementById('proxy-status').textContent = '[!] DIRECT (PROXY DOWN)';
           res = await fetch(buildUrl(DIRECT_URL), { signal });
           if (!res.ok) throw new Error('HTTP ' + res.status);
         }
@@ -1583,7 +1633,7 @@
         );
         if (!ac.length) {
           clearAircraftMarker(); clearPhoto();
-          document.getElementById('info').textContent    = 'NO AIRCRAFT ABOVE ' + locationName + '.';
+          document.getElementById('info').textContent    = 'NO AIRCRAFT ABOVE ' + locationName + '.\nTRY INCREASING GEOFENCE OR LOWERING ALT FLOOR.\nNEXT CHECK IN 15S.';
           ['d-alt','d-spd','d-vs','d-hdg','d-dist','d-sqk'].forEach(id => document.getElementById(id).textContent = '---');
           document.getElementById('counter').textContent = '';
           document.getElementById('info-wrap').className = '';
@@ -1649,6 +1699,9 @@
       if (geofenceCircle) updateGeofenceCircle();
       try { localStorage.setItem('geofenceKm', geofenceKm); } catch(e) {}
     });
+    document.getElementById('geofence-slider').addEventListener('change', function () {
+      if (locationLat !== 0 || locationLon !== 0) manualRefresh();
+    });
 
     // Altitude floor
     (function () {
@@ -1666,6 +1719,9 @@
       document.getElementById('altfloor-label').textContent = altFloorFt + ' FT';
       try { localStorage.setItem('altFloorFt', altFloorFt); } catch(e) {}
     });
+    document.getElementById('altfloor-slider').addEventListener('change', function () {
+      if (locationLat !== 0 || locationLon !== 0) manualRefresh();
+    });
 
 
     // ── Share link: auto-geocode on load ─────────────────────────────
@@ -1680,7 +1736,7 @@
     // ── Start ────────────────────────────────────────────────────────
     initMap();
     if (locationLat !== 0 || locationLon !== 0) fetchFlights(); // only fetch if a location is set
-    else document.getElementById('info').textContent = 'ENTER A LOCATION TO BEGIN.';
+    else document.getElementById('info').textContent = 'ENTER A LOCATION TO BEGIN.\nTYPE A CITY OR ADDRESS, THEN PRESS ENTER OR TAP [SET LOC].';
 
   </script>
 </body>
