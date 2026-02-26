@@ -261,6 +261,67 @@ app.get('/flights', async (req, res) => {
   }
 });
 
+// Weather endpoint — Open-Meteo (cached 10 min)
+const WEATHER_CACHE_MS = 10 * 60 * 1000;
+
+const WMO_CODES = {
+  0: 'Clear Sky', 1: 'Mainly Clear', 2: 'Partly Cloudy', 3: 'Overcast',
+  45: 'Fog', 48: 'Icy Fog',
+  51: 'Light Drizzle', 53: 'Moderate Drizzle', 55: 'Dense Drizzle',
+  61: 'Slight Rain', 63: 'Moderate Rain', 65: 'Heavy Rain',
+  71: 'Slight Snow', 73: 'Moderate Snow', 75: 'Heavy Snow', 77: 'Snow Grains',
+  80: 'Slight Showers', 81: 'Moderate Showers', 82: 'Violent Showers',
+  85: 'Slight Snow Showers', 86: 'Heavy Snow Showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm w/ Hail', 99: 'Thunderstorm w/ Heavy Hail',
+};
+
+function windCardinal(deg) {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+app.get('/weather', async (req, res) => {
+  const { lat, lon } = req.query;
+  if (!lat || !lon) return res.status(400).json({ error: 'lat and lon required' });
+
+  const key = `weather:${lat},${lon}`;
+  const now = Date.now();
+  const hit = cache.get(key);
+
+  if (hit && (now - hit.timestamp) < WEATHER_CACHE_MS) {
+    console.log(`[CACHE HIT] ${key}`);
+    return res.json(hit.data);
+  }
+
+  try {
+    console.log(`[FETCH] ${key}`);
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,` +
+      `wind_speed_10m,wind_direction_10m,uv_index&wind_speed_unit=kmh&timezone=auto`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(`Open-Meteo returned ${response.status}`);
+    const raw = await response.json();
+    const c = raw.current;
+    const data = {
+      temp:            c.temperature_2m,
+      feels_like:      c.apparent_temperature,
+      humidity:        c.relative_humidity_2m,
+      weather_code:    c.weather_code,
+      condition:       WMO_CODES[c.weather_code] || 'Unknown',
+      wind_speed:      c.wind_speed_10m,
+      wind_dir:        c.wind_direction_10m,
+      wind_cardinal:   windCardinal(c.wind_direction_10m),
+      uv_index:        c.uv_index,
+      utc_offset_secs: raw.utc_offset_seconds,
+    };
+    cache.set(key, { data, timestamp: now });
+    res.json(data);
+  } catch(e) {
+    console.error(`[ERROR] ${e.message}`);
+    res.status(502).json({ error: e.message });
+  }
+});
+
 // Save peak every 5 minutes as safety net
 setInterval(savePeak, 5 * 60 * 1000);
 
@@ -292,7 +353,8 @@ Features:
 | Endpoint     | Description |
 |--------------|-------------|
 | `GET /`      | Serves dashboard.html |
-| `GET /flights?lat=&lon=&radius=` | Proxied + cached flight data from airplanes.live |
+| `GET /flights?lat=&lon=&radius=` | Proxied + cached flight data from airplanes.live (10 s cache) |
+| `GET /weather?lat=&lon=` | Current weather from Open-Meteo (10 min cache) |
 | `GET /stats` | JSON — uptime, request counts, cache stats, peak hour array |
 | `GET /peak`  | JSON — full 24-hour breakdown with labels and percentages |
 | `GET /shutdown` | Gracefully stops the process (PM2 restarts it automatically) |
@@ -413,11 +475,13 @@ Registered through Cloudflare Registrar.
 ### Web app (index.html)
 ```
 https://api.overheadtracker.com/flights?lat=LAT&lon=LON&radius=RADIUS
+https://api.overheadtracker.com/weather?lat=LAT&lon=LON
 ```
 
 ### ESP32 (.ino)
 ```
 http://192.168.x.x:3000/flights?lat=LAT&lon=LON&radius=RADIUS
+http://192.168.x.x:3000/weather?lat=LAT&lon=LON
 ```
 
 ---
