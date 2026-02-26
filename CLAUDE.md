@@ -46,16 +46,34 @@ Pushes to `main` deploy automatically to GitHub Pages within ~60 seconds.
 
 ---
 
+## Pending Deployments — Complete when home
+
+> **Pi proxy** (server.js updated in repo but not yet on the Pi):
+> ```bash
+> ssh pi@192.168.86.24
+> # Open PI_PROXY_SETUP.md in VS Code Remote SSH, copy the server.js block to /home/pi/proxy/server.js, then:
+> pm2 restart proxy
+> pm2 logs proxy --lines 10   # confirm no errors; look for [FETCH] weather:...
+> ```
+
+> **ESP32** (firmware updated in repo but not yet flashed):
+> ```bash
+> ./build.sh
+> ```
+
+---
+
 ## External APIs Used by the Web App
 
 | Service | Purpose | Auth |
 |---------|---------|------|
 | airplanes.live | Live ADS-B flight data | None (via Pi proxy cache) |
+| Open-Meteo | Current weather conditions | None (via Pi proxy cache) |
 | Nominatim / OpenStreetMap | Location geocoding | None |
 | Planespotters.net | Aircraft photos by registration | None |
 | CartoDB | Dark map tiles (Leaflet) | None |
 
-The Pi proxy at `api.overheadtracker.com` caches airplanes.live responses for 10 s to avoid hammering the upstream API.
+The Pi proxy at `api.overheadtracker.com` caches airplanes.live responses for 10 s and Open-Meteo weather for 10 min.
 
 ---
 
@@ -64,6 +82,8 @@ The Pi proxy at `api.overheadtracker.com` caches airplanes.live responses for 10
 - **Geofence**: User-configurable radius (2–20 km) around a chosen location. Only aircraft inside the fence are shown.
 - **Altitude floor**: Filters out aircraft below a configurable altitude (200–5 000 ft AGL).
 - **Flight phase detection**: LANDING / TAKING OFF / APPROACH / DESCENDING / CLIMBING / OVERHEAD — derived from speed, altitude, and vertical rate.
+- **Weather**: Current conditions fetched from Open-Meteo via the Pi proxy (`/weather?lat=&lon=`). Proxy caches for 10 min. Web app refreshes every 15 min; ESP32 every 15 min. Fields: temp, feels_like, humidity, condition (WMO code → text), wind_speed (km/h), wind_cardinal, uv_index, utc_offset_secs.
+- **ESP32 weather screen**: Shown automatically when no aircraft are in range. Shows NTP local-time clock (HH:MM + date) plus weather grid. Tap the **WX** pill in the header to toggle it at any time.
 - **No build step**: `index.html` is deployed as-is; never introduce a bundler or external dependency that requires a build pipeline.
 - **No framework**: The web app uses vanilla JS and the browser's built-in APIs only. Do not add React, Vue, or similar.
 
