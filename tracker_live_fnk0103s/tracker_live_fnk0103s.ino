@@ -82,12 +82,35 @@ uint16_t touchCalData[5] = {0};
 bool     touchReady      = false;
 uint32_t lastTouchMs     = 0;
 #define  TOUCH_DEBOUNCE_MS  700
-// Geofence preset button zone in header
-#define  GEO_BTN_X1  378
-#define  GEO_BTN_X2  432
-// CFG button zone in header (far right — tap to open captive portal)
-#define  CFG_BTN_X1  434
-#define  CFG_BTN_X2  476
+// Header button zones (right-side pills, left-to-right: WX · GEO · CFG)
+#define  WX_BTN_X1   378
+#define  WX_BTN_X2   414
+#define  GEO_BTN_X1  416
+#define  GEO_BTN_X2  452
+#define  CFG_BTN_X1  454
+#define  CFG_BTN_X2  478
+
+// ─── Screen mode ──────────────────────────────────────
+enum ScreenMode { SCREEN_FLIGHT, SCREEN_WEATHER };
+ScreenMode currentScreen = SCREEN_FLIGHT;
+
+// ─── Weather data ─────────────────────────────────────
+struct WeatherData {
+  float   temp;
+  float   feels_like;
+  int     humidity;
+  char    condition[32];
+  float   wind_speed;
+  int     wind_dir;
+  char    wind_cardinal[4];
+  float   uv_index;
+  int16_t utc_offset_secs;
+};
+WeatherData wxData;
+bool        wxReady         = false;
+int         wxCountdown     = 0;
+int         lastMinute      = -1;  // for clock-only redraws
+const int   WX_REFRESH_SECS = 900; // 15 minutes
 
 // ─── Flight status ────────────────────────────────────
 enum FlightStatus {
@@ -723,6 +746,15 @@ void drawHeader(bool fetching = false) {
   tft.setCursor(locLabelX, 10);
   tft.print(LOCATION_NAME);
 
+  // ── WX pill (weather screen toggle) ──
+  uint16_t wxBg  = (currentScreen == SCREEN_WEATHER) ? C_CYAN : C_DIMMER;
+  uint16_t wxFg  = (currentScreen == SCREEN_WEATHER) ? C_BG   : C_AMBER;
+  tft.fillRect(WX_BTN_X1, 4, WX_BTN_X2 - WX_BTN_X1, 20, wxBg);
+  tft.setTextColor(wxFg, wxBg);
+  tft.setTextSize(1);
+  tft.setCursor((WX_BTN_X1 + WX_BTN_X2) / 2 - 6, 10);
+  tft.print("WX");
+
   // ── Geofence preset pill ──
   const char* geoLabels[] = {"5K", "10K", "50K"};
   const char* geoLabel = geoLabels[geoIndex];
@@ -781,6 +813,19 @@ void handleTouch(uint16_t tx, uint16_t ty) {
   uint32_t now = millis();
   if (now - lastTouchMs < TOUCH_DEBOUNCE_MS) return;
   lastTouchMs = now;
+
+  // WX tap — toggle weather screen
+  if (tx >= WX_BTN_X1 && tx <= WX_BTN_X2 && ty < HDR_H) {
+    if (currentScreen == SCREEN_WEATHER) {
+      currentScreen = SCREEN_FLIGHT;
+      if (flightCount > 0) renderFlight(flights[flightIndex]);
+      else renderMessage("NO AIRCRAFT", "IN RANGE");
+    } else {
+      currentScreen = SCREEN_WEATHER;
+      renderWeather();
+    }
+    return;
+  }
 
   // Geofence preset cycle — tap the geo pill in the header
   if (tx >= GEO_BTN_X1 && tx <= GEO_BTN_X2 && ty < HDR_H) {
@@ -936,6 +981,157 @@ void renderFlight(const Flight& f) {
   drawStatusBar();
 }
 
+
+// ─── Fetch weather from Pi proxy (Open-Meteo) ─────────
+void fetchWeather() {
+  char url[160];
+  snprintf(url, sizeof(url),
+    "http://%s:%d/weather?lat=%.4f&lon=%.4f",
+    PROXY_HOST, PROXY_PORT, HOME_LAT, HOME_LON);
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(8000);
+  int code = http.GET();
+  if (code != 200) {
+    Serial.printf("[WX] Fetch failed (%d)\n", code);
+    http.end();
+    return;
+  }
+  String body = http.getString();
+  http.end();
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, body) != DeserializationError::Ok) {
+    Serial.println("[WX] JSON parse error");
+    return;
+  }
+  wxData.temp            = doc["temp"]            | 0.0f;
+  wxData.feels_like      = doc["feels_like"]      | 0.0f;
+  wxData.humidity        = doc["humidity"]        | 0;
+  wxData.wind_speed      = doc["wind_speed"]      | 0.0f;
+  wxData.wind_dir        = doc["wind_dir"]        | 0;
+  wxData.uv_index        = doc["uv_index"]        | 0.0f;
+  wxData.utc_offset_secs = doc["utc_offset_secs"] | 0;
+  const char* cond = doc["condition"] | "---";
+  strlcpy(wxData.condition, cond, sizeof(wxData.condition));
+  const char* wc = doc["wind_cardinal"] | "?";
+  strlcpy(wxData.wind_cardinal, wc, sizeof(wxData.wind_cardinal));
+  wxReady = true;
+  Serial.printf("[WX] %.1f C  %s  UV %.1f\n", wxData.temp, wxData.condition, wxData.uv_index);
+}
+
+// ─── Weather + clock screen ────────────────────────────
+void renderWeather() {
+  drawHeader(false);
+  tft.fillRect(0, CONTENT_Y, W, CONTENT_H, C_BG);
+
+  // ── Clock ──
+  time_t utcNow  = time(NULL);
+  bool   ntpOk   = utcNow > 1000000000UL;
+  time_t localNow = (ntpOk && wxReady && wxData.utc_offset_secs != 0)
+                      ? utcNow + wxData.utc_offset_secs : utcNow;
+  struct tm* t   = gmtime(&localNow);
+
+  int cy = CONTENT_Y + 12;
+  char timeBuf[8];
+  if (ntpOk) snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", t->tm_hour, t->tm_min);
+  else       strlcpy(timeBuf, "--:--", sizeof(timeBuf));
+
+  // HH:MM centred — size 6: 36px/char, 5 chars = 180px
+  tft.setTextSize(6);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor((W - 180) / 2, cy);
+  tft.print(timeBuf);
+
+  cy += 52;
+  if (ntpOk) {
+    const char* dayNames[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
+    const char* monNames[] = {"JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"};
+    char dateBuf[20];
+    snprintf(dateBuf, sizeof(dateBuf), "%s %d %s",
+             dayNames[t->tm_wday], t->tm_mday, monNames[t->tm_mon]);
+    int dateW = strlen(dateBuf) * 12;
+    tft.setTextSize(2);
+    tft.setTextColor(C_DIM, C_BG);
+    tft.setCursor((W - dateW) / 2, cy);
+    tft.print(dateBuf);
+  }
+  cy += 22;
+
+  tft.drawFastHLine(10, cy, W - 20, C_DIMMER);
+  cy += 8;
+
+  if (!wxReady) {
+    tft.setTextSize(1);
+    tft.setTextColor(C_DIMMER, C_BG);
+    tft.setCursor(15, cy);
+    tft.print("WEATHER LOADING...");
+    drawStatusBar();
+    return;
+  }
+
+  // ── Weather grid ──
+  char buf[32];
+
+  // Row 1: Temperature | Feels Like
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(15, cy);      tft.print("TEMPERATURE");
+  tft.setCursor(W/2 + 15, cy); tft.print("FEELS LIKE");
+  cy += 10;
+  tft.setTextSize(2);
+  tft.setTextColor(C_AMBER, C_BG);
+  snprintf(buf, sizeof(buf), "%.1f C", wxData.temp);
+  tft.setCursor(15, cy); tft.print(buf);
+  snprintf(buf, sizeof(buf), "%.1f C", wxData.feels_like);
+  tft.setCursor(W/2 + 15, cy); tft.print(buf);
+  cy += 20;
+
+  tft.drawFastHLine(10, cy, W - 20, C_DIMMER); cy += 6;
+
+  // Row 2: Condition
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(15, cy); tft.print("CONDITIONS");
+  cy += 10;
+  tft.setTextSize(2);
+  tft.setTextColor(C_YELLOW, C_BG);
+  tft.setCursor(15, cy); tft.print(wxData.condition);
+  cy += 20;
+
+  tft.drawFastHLine(10, cy, W - 20, C_DIMMER); cy += 6;
+
+  // Row 3: Humidity | Wind
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(15, cy);       tft.print("HUMIDITY");
+  tft.setCursor(W/2 + 15, cy); tft.print("WIND");
+  cy += 10;
+  tft.setTextSize(2);
+  tft.setTextColor(C_CYAN, C_BG);
+  snprintf(buf, sizeof(buf), "%d%%", wxData.humidity);
+  tft.setCursor(15, cy); tft.print(buf);
+  tft.setTextColor(C_AMBER, C_BG);
+  snprintf(buf, sizeof(buf), "%.0f KM  %s", wxData.wind_speed, wxData.wind_cardinal);
+  tft.setCursor(W/2 + 15, cy); tft.print(buf);
+  cy += 20;
+
+  tft.drawFastHLine(10, cy, W - 20, C_DIMMER); cy += 6;
+
+  // Row 4: UV Index (colour-coded by level)
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(15, cy); tft.print("UV INDEX");
+  cy += 10;
+  uint16_t uvCol = wxData.uv_index < 3.0f ? C_GREEN :
+                   wxData.uv_index < 6.0f ? C_YELLOW :
+                   wxData.uv_index < 8.0f ? C_AMBER  : C_RED;
+  tft.setTextSize(2);
+  tft.setTextColor(uvCol, C_BG);
+  snprintf(buf, sizeof(buf), "%.1f", wxData.uv_index);
+  tft.setCursor(15, cy); tft.print(buf);
+
+  drawStatusBar();
+}
 
 // ── Boot sequence ───────────────────────────────────────
 static int bootLineY = 56;
@@ -1361,8 +1557,13 @@ void fetchFlights() {
   usingCache  = fromCache;
 
   for (int i = 0; i < flightCount; i++) logFlight(flights[i]);
-  if (flightCount == 0) renderMessage("NO AIRCRAFT", "IN RANGE");
-  else                  renderFlight(flights[0]);
+  if (flightCount == 0) {
+    currentScreen = SCREEN_WEATHER;
+    renderWeather();
+  } else {
+    currentScreen = SCREEN_FLIGHT;
+    renderFlight(flights[0]);
+  }
 }
 
 // ─── Setup ────────────────────────────────────────────
@@ -1637,6 +1838,8 @@ void setup() {
 
   fetchFlights();
   countdown = REFRESH_SECS;
+  fetchWeather();
+  wxCountdown = WX_REFRESH_SECS;
 }
 
 // ─── Loop ─────────────────────────────────────────────
@@ -1654,15 +1857,38 @@ void loop() {
   if (now - lastTick >= 1000) {
     lastTick = now;
     countdown--;
-    if (flightCount > 0) drawStatusBar();
+    wxCountdown--;
+
+    if (currentScreen == SCREEN_FLIGHT && flightCount > 0) drawStatusBar();
+
+    // Update clock on weather screen when the minute changes
+    if (currentScreen == SCREEN_WEATHER) {
+      time_t utcNow   = time(NULL);
+      time_t localNow = (wxReady && wxData.utc_offset_secs != 0)
+                          ? utcNow + wxData.utc_offset_secs : utcNow;
+      struct tm* t = gmtime(&localNow);
+      int curMin = t->tm_hour * 60 + t->tm_min;
+      if (curMin != lastMinute) {
+        lastMinute = curMin;
+        renderWeather();
+      }
+    }
+
     if (countdown <= 0) {
       fetchFlights();
       countdown = REFRESH_SECS;
       lastCycle = millis();
     }
+
+    if (wxCountdown <= 0) {
+      fetchWeather();
+      wxCountdown = WX_REFRESH_SECS;
+      if (currentScreen == SCREEN_WEATHER) renderWeather();
+    }
   }
 
-  if (flightCount > 1 && now - lastCycle >= (unsigned long)CYCLE_SECS * 1000) {
+  if (flightCount > 1 && currentScreen == SCREEN_FLIGHT &&
+      now - lastCycle >= (unsigned long)CYCLE_SECS * 1000) {
     lastCycle = now;
     flightIndex = (flightIndex + 1) % flightCount;
     renderFlight(flights[flightIndex]);

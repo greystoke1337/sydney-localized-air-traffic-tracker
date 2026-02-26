@@ -61,6 +61,19 @@
     body.dotmatrix #counter { margin: 0 6px; }
     body.dotmatrix #error { color: var(--c-glow); word-break: break-all; font-size: 0.85rem; }
 
+    /* Weather strip */
+    #wx-strip {
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      line-height: 1.7;
+      opacity: 0.85;
+      border-top: 1px solid rgba(255,166,0,0.15);
+      margin-top: 4px;
+      padding-top: 4px;
+    }
+    .wx-label { opacity: 0.4; margin-right: 6px; letter-spacing: 0.1em; }
+    .wx-sep   { opacity: 0.3; margin: 0 5px; }
+
     /* Flight info block — left border changes colour with flight phase */
     #info-wrap {
       position: relative; /* needed so the altitude bar can sit inside */
@@ -455,6 +468,11 @@
     </div>
 
     <p id="error"></p>
+
+    <!-- Weather strip — populated by fetchWeather(), hidden until data arrives -->
+    <div id="wx-strip" style="display:none">
+      <span class="wx-label">WX</span><span id="wx-temp"></span><span class="wx-sep">·</span><span id="wx-cond"></span><span class="wx-sep">·</span><span id="wx-wind"></span><span class="wx-sep">·</span><span id="wx-hum"></span><span class="wx-sep">·</span><span id="wx-uv"></span>
+    </div>
 
     <!-- Emergency squawk banner — visible when any in-range flight squawks emergency -->
     <div id="emerg-banner" role="alert" aria-live="assertive" aria-atomic="true" onclick="dismissEmergency()"></div>
@@ -1572,12 +1590,38 @@
         clearAircraftMarker();
         updateGeofenceCircle();
         try { localStorage.setItem('location', JSON.stringify({ name: input, lat, lon })); } catch(e) {}
+        fetchWeather();
         await fetchFlights();
       } catch(e) {
         document.getElementById('error').textContent = 'LOCATION ERR: ' + e.message;
       }
     }
 
+
+    // ── Fetch weather ─────────────────────────────────────────────────
+    const WEATHER_URL = 'https://api.overheadtracker.com/weather?lat={LAT}&lon={LON}';
+
+    async function fetchWeather() {
+      if (!locationLat && !locationLon) return;
+      try {
+        const url = WEATHER_URL.replace('{LAT}', locationLat).replace('{LON}', locationLon);
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) return;
+        const d = await res.json();
+        document.getElementById('wx-temp').textContent =
+          Math.round(d.temp) + '\u00b0C (FEELS ' + Math.round(d.feels_like) + '\u00b0C)';
+        document.getElementById('wx-cond').textContent = (d.condition || '').toUpperCase();
+        document.getElementById('wx-wind').textContent =
+          Math.round(d.wind_speed) + ' KM/H ' + d.wind_cardinal;
+        document.getElementById('wx-hum').textContent = d.humidity + '% RH';
+        document.getElementById('wx-uv').textContent =
+          'UV ' + (d.uv_index != null ? d.uv_index.toFixed(1) : '---');
+        document.getElementById('wx-strip').style.display = '';
+      } catch(e) { /* weather is best-effort; fail silently */ }
+    }
+
+    // Refresh weather every 15 minutes
+    setInterval(() => { if (locationLat || locationLon) fetchWeather(); }, 15 * 60 * 1000);
 
     // ── Fetch flights ────────────────────────────────────────────────
     // Queries proxy first, falls back to airplanes.live directly if proxy is down.
