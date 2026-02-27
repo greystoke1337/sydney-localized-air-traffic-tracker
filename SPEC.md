@@ -1,20 +1,18 @@
 # Overhead Tracker — Product Specification
 
-## What It Is
+## What it is
 
-Overhead Tracker is a real-time aircraft tracking system that answers one question: **"What planes are flying above me right now?"** Given a location anywhere in the world, it fetches live ADS-B transponder data, filters to aircraft within a user-defined radius and altitude floor, and presents them sorted nearest-first with flight details, a live map, and phase classification.
-
----
-
-## Why It Exists
-
-Commercial flight tracking apps (FlightRadar24, etc.) are world-map oriented — they show everything everywhere and require you to find your location. This project is **location-first and overhead-first**: you set one location and the system only surfaces aircraft directly above it, cycling through them automatically. The secondary motivation is a physical hardware display that requires no phone or browser — just a self-contained device on a shelf.
+Real-time aircraft tracking that answers one question: "What planes are flying above me right now?" Set a location anywhere in the world, and it fetches live ADS-B data, filters to aircraft within your radius and altitude floor, and shows them sorted nearest-first.
 
 ---
 
-## System Architecture
+## Why it exists
 
-The project has three deployed components:
+FlightRadar24 and similar apps show the whole world — you have to go find your location. This is location-first: you set one spot and only see aircraft directly above it. The secondary goal is a physical hardware display that needs no phone or browser.
+
+---
+
+## System architecture
 
 ```
 ┌─────────────────────┐     HTTPS      ┌────────────────────────────────┐
@@ -29,32 +27,26 @@ The project has three deployed components:
 └─────────────────────┘     ◀──────────┘ cached (10s TTL)
 ```
 
-### Component 1: Web app (`index.html`)
+**Web app (`index.html`)** — single HTML file, no build step, no framework. Deployed to GitHub Pages at `overheadtracker.com` on push to `main`.
 
-A single self-contained HTML file. No build step, no framework, no backend required to run locally. Deployed to GitHub Pages at `overheadtracker.com` by pushing to `main`.
+**Raspberry Pi proxy (`server.js`)** — Node.js/Express on a Pi 3B+ at `192.168.86.24:3000`. Caches airplanes.live responses for 10 seconds so multiple clients can refresh at 15-second intervals without hitting rate limits. Exposed publicly via Cloudflare Tunnel. Managed by PM2.
 
-### Component 2: Raspberry Pi proxy (`server.js`)
-
-A Node.js/Express server on a Pi 3B+ at `192.168.86.24:3000`. Its sole job is to cache airplanes.live API responses for 10 seconds so multiple clients (web app + ESP32) can refresh at 15-second intervals without triggering API rate limits. Exposed publicly over a Cloudflare Tunnel as `api.overheadtracker.com`. The Pi also runs a `display.py` process that renders a status dashboard to a local 3.5" TFT over framebuffer. Managed by PM2 for auto-restart.
-
-### Component 3: ESP32 TFT display (`.ino` firmware)
-
-A standalone physical device (Freenove FNK0103S, 4" 480×320 ST7796 touchscreen). Runs entirely independently of the web app — polls the local proxy directly over LAN. Configured on first boot via a captive portal Wi-Fi form. Displays one flight at a time, cycling every 8 seconds, with a touchscreen button to change the geofence radius.
+**ESP32 TFT display (`.ino` firmware)** — Freenove FNK0103S, 4" 480×320 ST7796 touchscreen. Polls the local proxy over LAN, independent of the web app. Displays one flight at a time, cycling every 8 seconds.
 
 ---
 
-## Data Pipeline
+## Data pipeline
 
-1. **Geocoding** — user's location string is resolved to lat/lon via Nominatim (OpenStreetMap). No API key needed.
-2. **Fetch** — proxy is queried with `lat`, `lon`, `radius` (4× the geofence in nautical miles, to cast a wider net than the actual filter).
-3. **Filter** — results are reduced to aircraft within the geofence radius *and* above the altitude floor.
-4. **Sort** — remaining aircraft sorted by haversine distance, closest first.
-5. **Render** — flight info, map, photo, altitude bar, and phase colour rendered for the current aircraft.
-6. **Repeat** — every 15 seconds automatically; any in-flight request is aborted before starting the next.
+1. **Geocode** — location string resolved to lat/lon via Nominatim. No API key.
+2. **Fetch** — proxy queried with `lat`, `lon`, `radius` (4x the geofence in nautical miles).
+3. **Filter** — reduced to aircraft within the geofence radius and above the altitude floor.
+4. **Sort** — by haversine distance, closest first.
+5. **Render** — flight info, map, photo, altitude bar, phase colour.
+6. **Repeat** — every 15 seconds; any in-flight request is aborted before the next starts.
 
 ---
 
-## Feature Set (Web App)
+## Feature set (web app)
 
 | Category | Features |
 |---|---|
@@ -68,7 +60,7 @@ A standalone physical device (Freenove FNK0103S, 4" 480×320 ST7796 touchscreen)
 | **Navigation** | Arrow key browsing, NEAREST button, session flight log |
 | **UX** | CRT scanline aesthetic, phase colour bleed on info block border, altitude bar, mobile-responsive |
 
-## Feature Set (ESP32 Display)
+## Feature set (ESP32 display)
 
 | Category | Features |
 |---|---|
@@ -79,7 +71,7 @@ A standalone physical device (Freenove FNK0103S, 4" 480×320 ST7796 touchscreen)
 
 ---
 
-## External Dependencies
+## External dependencies
 
 | Service | Used for | Auth |
 |---|---|---|
@@ -93,6 +85,6 @@ A standalone physical device (Freenove FNK0103S, 4" 480×320 ST7796 touchscreen)
 
 ## Deployment
 
-- **Web app** — `git push` to `main` → GitHub Pages auto-deploys within ~60 seconds
+- **Web app** — `git push` to `main`; GitHub Pages auto-deploys within ~60 seconds
 - **Proxy** — SSH to `pi@piproxy.local`, edit `/home/pi/proxy/server.js`, `pm2 restart proxy`
-- **ESP32** — `./build.sh` (compiles with `arduino-cli` and uploads to COM4)
+- **ESP32** — `./build.sh` (compiles with `arduino-cli` and uploads)
