@@ -13,7 +13,7 @@ Three components:
 | Pi proxy | Node.js / Express on Raspberry Pi 3B+ | api.overheadtracker.com (Cloudflare Tunnel) |
 | ESP32 firmware | Arduino C++ | Physical device (USB upload via `build.sh`) |
 
-Live URL: https://greystoke1337.github.io/sydney-localized-air-traffic-tracker/
+Live URL: https://greystoke1337.github.io/localized-air-traffic-tracker/
 Custom domain: https://overheadtracker.com
 
 ---
@@ -21,14 +21,14 @@ Custom domain: https://overheadtracker.com
 ## Repository Layout
 
 ```
-index.html                  # Entire web app (single file, ~118 KB)
+index.html                  # Entire web app (single file, ~120 KB)
 build.sh                    # ESP32 compile + upload helper (arduino-cli)
 PI_PROXY_SETUP.md           # Raspberry Pi proxy setup guide + full server source
 SPEC.md                     # Product specification and feature matrix
 README.md                   # User-facing documentation
 CNAME                       # GitHub Pages custom domain
 tracker_live_fnk0103s/      # ESP32 hardware project
-  tracker_live_fnk0103s.ino # Arduino firmware (~59 KB)
+  tracker_live_fnk0103s.ino # Arduino firmware (~67 KB)
   enclosure/                # 3D-printable case files (STL/STEP)
 .claude/agents/             # Specialist sub-agents
   backend-specialist.md
@@ -40,9 +40,9 @@ tracker_live_fnk0103s/      # ESP32 hardware project
 
 ## Branch Policy
 
-Always develop and push directly to **`main`**.
+Always develop and push directly to **`master`**.
 Do **not** create feature branches.
-Pushes to `main` deploy automatically to GitHub Pages within ~60 seconds.
+Pushes to `master` deploy automatically to GitHub Pages within ~60 seconds.
 
 ---
 
@@ -74,18 +74,19 @@ The Pi proxy at `api.overheadtracker.com` caches airplanes.live responses for 10
 ### Web app change
 1. Edit `index.html`.
 2. Test by opening the file in a browser (`file://` works — no server needed).
-3. `git add index.html && git commit -m "..." && git push origin main`
+3. `git add index.html && git commit -m "..." && git push origin master`
 4. Verify at the live URL after ~60 s.
 
 ### Pi proxy change
 - The full server source and setup instructions are in `PI_PROXY_SETUP.md`.
-- The Pi lives at `192.168.86.24` (local network only; SSH in then `pm2 restart proxy`).
+- SSH into the Pi on your local network, then run `pm2 restart proxy`.
 - Tunnel is managed by `cloudflared` running as a systemd service.
 
 ### ESP32 firmware change
 1. Edit `tracker_live_fnk0103s/tracker_live_fnk0103s.ino`.
-2. Run `./build.sh` to compile and upload (requires Arduino IDE + `arduino-cli` on Windows).
-3. Serial monitor: `./build.sh monitor`.
+2. First flash (or if OTA is unavailable): run `./build.sh` to compile and upload via USB (requires Arduino IDE + `arduino-cli` on Windows).
+3. Subsequent flashes: compile with `./build.sh compile`, then upload via Arduino IDE using the `overhead-tracker` network port (OTA over WiFi).
+4. Serial monitor: `./build.sh monitor`.
 
 ---
 

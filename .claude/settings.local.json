@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/maxim/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.7/**)"
+    ]
+  }
+}

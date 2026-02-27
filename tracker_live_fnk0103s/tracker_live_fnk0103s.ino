@@ -6,6 +6,7 @@
     - TFT_eSPI (Freenove pre-configured version)
     - ArduinoJson (install via Library Manager)
     - SD (built into Arduino ESP32 core — no install needed)
+    - ArduinoOTA (built into Arduino ESP32 core — no install needed)
 */
 
 #include <TFT_eSPI.h>
@@ -20,6 +21,7 @@
 #include <time.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <ArduinoOTA.h>
 
 TFT_eSPI   tft = TFT_eSPI();
 WebServer  setupServer(80);
@@ -85,10 +87,10 @@ uint32_t lastTouchMs     = 0;
 // Header button zones (right-side pills, left-to-right: WX · GEO · CFG)
 #define  WX_BTN_X1   378
 #define  WX_BTN_X2   414
-#define  GEO_BTN_X1  416
+#define  GEO_BTN_X1  414
 #define  GEO_BTN_X2  452
 #define  CFG_BTN_X1  454
-#define  CFG_BTN_X2  478
+#define  CFG_BTN_X2  480
 
 // ─── Screen mode ──────────────────────────────────────
 enum ScreenMode { SCREEN_FLIGHT, SCREEN_WEATHER };
@@ -756,7 +758,7 @@ void drawHeader(bool fetching = false) {
   tft.print("WX");
 
   // ── Geofence preset pill ──
-  const char* geoLabels[] = {"5K", "10K", "50K"};
+  const char* geoLabels[] = {"5km", "10km", "50km"};
   const char* geoLabel = geoLabels[geoIndex];
   int geoLabelW = strlen(geoLabel) * 6 + 8;
   int geoPillX  = (GEO_BTN_X1 + GEO_BTN_X2) / 2 - geoLabelW / 2;
@@ -807,6 +809,8 @@ void drawStatusBar() {
   tft.print(buf);
 }
 
+
+void renderMessage(const char* line1, const char* line2);
 
 // ─── Touch handler ────────────────────────────────────
 void handleTouch(uint16_t tx, uint16_t ty) {
@@ -1244,7 +1248,7 @@ int parsePayload(const String& payload) {
   JsonObject af = filter["ac"].createNestedObject();
   af["flight"] = af["r"] = af["t"] = af["lat"] = af["lon"] =
   af["alt_baro"] = af["gs"] = af["baro_rate"] = af["track"] =
-  af["squawk"] = af["dep"] = af["arr"] = true;
+  af["squawk"] = af["dep"] = af["arr"] = af["orig_iata"] = af["dest_iata"] = true;
   Serial.printf("[MEM] Before JSON alloc: %d free\n", ESP.getFreeHeap());
   DynamicJsonDocument doc(32768);
   DeserializationError err = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
@@ -1400,6 +1404,8 @@ int fetchAndParseDirectAPI() {
     else if (strcmp(key,"squawk")==0)    strlcpy(ac_squawk,   val, sizeof(ac_squawk));
     else if (strcmp(key,"dep")==0)       strlcpy(ac_dep,      val, sizeof(ac_dep));
     else if (strcmp(key,"arr")==0)       strlcpy(ac_arr,      val, sizeof(ac_arr));
+    else if (strcmp(key,"orig_iata")==0 && !ac_dep[0])  strlcpy(ac_dep, val, sizeof(ac_dep));
+    else if (strcmp(key,"dest_iata")==0 && !ac_arr[0])  strlcpy(ac_arr, val, sizeof(ac_arr));
     else if (strcmp(key,"lat")==0)       ac_lat   = atof(val);
     else if (strcmp(key,"lon")==0)       ac_lon   = atof(val);
     else if (strcmp(key,"alt_baro")==0)  ac_alt   = atoi(val);
@@ -1477,8 +1483,8 @@ int extractFlights(DynamicJsonDocument& doc) {
     strlcpy(f.reg,    a["r"]      | "",     sizeof(f.reg));
     strlcpy(f.type,   a["t"]      | "",     sizeof(f.type));
     strlcpy(f.squawk, a["squawk"] | "----", sizeof(f.squawk));
-    strlcpy(f.dep,    a["dep"]    | "",     sizeof(f.dep));
-    strlcpy(f.arr,    a["arr"]    | "",     sizeof(f.arr));
+    { const char* d = a["dep"] | ""; strlcpy(f.dep, d[0] ? d : (a["orig_iata"] | ""), sizeof(f.dep)); }
+    { const char* a2 = a["arr"] | ""; strlcpy(f.arr, a2[0] ? a2 : (a["dest_iata"] | ""), sizeof(f.arr)); }
     f.lat   = lat;
     f.lon = lon; f.alt = alt;
     f.speed = (int)(a["gs"]      | 0.0f);
@@ -1564,6 +1570,26 @@ void fetchFlights() {
     currentScreen = SCREEN_FLIGHT;
     renderFlight(flights[0]);
   }
+}
+
+// ─── OTA progress overlay ─────────────────────────────
+void drawOtaProgress(int pct) {
+  static bool first = true;
+  if (first) {
+    first = false;
+    tft.fillScreen(C_BG);
+    tft.setTextColor(TFT_WHITE, C_BG);
+    tft.setTextSize(3);
+    tft.setCursor(100, 110);
+    tft.print("OTA UPDATE");
+    tft.setTextSize(2);
+    tft.setTextColor(C_DIM, C_BG);
+    tft.setCursor(80, 155);
+    tft.print("Do not power off");
+  }
+  const int BX = 40, BY = 210, BW = 400, BH = 24;
+  tft.drawRect(BX, BY, BW, BH, TFT_WHITE);
+  tft.fillRect(BX + 1, BY + 1, (BW - 2) * pct / 100, BH - 2, C_GREEN);
 }
 
 // ─── Setup ────────────────────────────────────────────
@@ -1698,6 +1724,29 @@ void setup() {
     // Sync NTP so cache timestamps are meaningful
     configTime(0, 0, "pool.ntp.org");
     Serial.println("NTP sync started");
+    ArduinoOTA.setHostname("overhead-tracker");
+    ArduinoOTA.onStart([]() {
+      drawOtaProgress(0);
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+      drawOtaProgress(progress * 100 / total);
+    });
+    ArduinoOTA.onEnd([]() {
+      tft.setTextColor(C_GREEN, C_BG);
+      tft.setTextSize(2);
+      tft.setCursor(160, 250);
+      tft.print("Restarting...");
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+      tft.setTextColor(TFT_RED, C_BG);
+      tft.setTextSize(2);
+      tft.setCursor(120, 250);
+      tft.printf("OTA Error [%u]", error);
+      delay(3000);
+      ESP.restart();
+    });
+    ArduinoOTA.begin();
+    Serial.println("OTA ready — overhead-tracker.local");
   }
 
   if (WiFi.status() != WL_CONNECTED) {
@@ -1845,6 +1894,7 @@ void setup() {
 // ─── Loop ─────────────────────────────────────────────
 void loop() {
   unsigned long now = millis();
+  ArduinoOTA.handle();
 
   // ── Touch polling ──────────────────────────────────
   if (touchReady) {
