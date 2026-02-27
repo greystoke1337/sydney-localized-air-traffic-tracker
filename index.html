@@ -181,7 +181,7 @@
       border-radius: 0; white-space: nowrap;
     }
     .dm-callout::before { display: none; }
-    .leaflet-control-attribution { font-size: 9px; opacity: 0.35; background: transparent !important; color: #aaa !important; }
+    .leaflet-control-attribution { font-size: 9px; opacity: 0.6; background: transparent !important; color: #aaa !important; }
     .leaflet-control-attribution a { color: #aaa !important; }
 
     /* Footer: counter left, timer right */
@@ -342,7 +342,7 @@
       display: none;
       position: fixed; inset: 0;
       background: rgba(26,10,0,0.92);
-      z-index: 200;
+      z-index: 1100;
       align-items: center; justify-content: center;
     }
     #kbd-overlay.visible { display: flex; }
@@ -448,7 +448,7 @@
 
     <!-- Location input: any city, suburb, or address worldwide -->
     <div id="location-ctrl">
-      <label for="location-input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;">Location</label>
+      <label for="location-input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;">Location</label>
       <input id="location-input" value="" placeholder="City, suburb, address..." autocomplete="off">
       <button onclick="setLocation()">SET LOC</button>
     </div>
@@ -612,6 +612,10 @@
 
     let flights = [], flightIndex = 0;
     let fetchController = null; // AbortController — cancels stale requests
+
+    function timeoutSignal(ms) {
+      return typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(ms) : undefined;
+    }
 
 
     // ── Theme ────────────────────────────────────────────────────────
@@ -1227,7 +1231,7 @@
       try {
         const res = await fetch(
           'https://api.adsbdb.com/v0/callsign/' + callsign,
-          { signal: AbortSignal.timeout(5000) }
+          { signal: timeoutSignal(5000) }
         );
         if (!res.ok) { routeCache.set(callsign, null); return null; }
         const data = await res.json();
@@ -1518,7 +1522,7 @@
       try {
         const res = await fetch(
           'https://api.planespotters.net/pub/photos/hex/' + hex + '?reg=' + reg + '&icaoType=' + type,
-          { signal: AbortSignal.timeout(6000) }
+          { signal: timeoutSignal(6000) }
         );
         if (!res.ok) return;
         const data  = await res.json();
@@ -1567,7 +1571,7 @@
     // Works worldwide — no country restriction.
     async function geocodeLocation(name) {
       const url = 'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(name) + '&format=json&limit=1';
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'Accept-Language': 'en' } });
+      const res = await fetch(url, { signal: timeoutSignal(8000), headers: { 'Accept-Language': 'en' } });
       if (!res.ok) throw new Error('Geocoding request failed');
       const data = await res.json();
       if (!data.length) throw new Error('Location not found: ' + name);
@@ -1605,7 +1609,7 @@
       if (!locationLat && !locationLon) return;
       try {
         const url = WEATHER_URL.replace('{LAT}', locationLat).replace('{LON}', locationLon);
-        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        const res = await fetch(url, { signal: timeoutSignal(8000) });
         if (!res.ok) return;
         const d = await res.json();
         document.getElementById('wx-temp').textContent =
@@ -1648,8 +1652,8 @@
         // Try proxy first (6s timeout); fall back to airplanes.live directly if it fails
         let res;
         try {
-          const proxySignal = AbortSignal.any
-            ? AbortSignal.any([signal, AbortSignal.timeout(6000)])
+          const proxySignal = (AbortSignal.any && AbortSignal.timeout)
+            ? AbortSignal.any([signal, timeoutSignal(6000)])
             : signal;
           res = await fetch(buildUrl(PROXY_URL), { signal: proxySignal });
           if (!res.ok) throw new Error('proxy HTTP ' + res.status);
@@ -1705,9 +1709,10 @@
 
 
     // ── Keyboard navigation ──────────────────────────────────────────
-    // Arrow keys browse flights; suppressed while typing in the location input.
+    // Arrow keys browse flights; suppressed while any input element is focused.
     document.addEventListener('keydown', e => {
-      const typing = document.activeElement === document.getElementById('location-input');
+      const typing = document.activeElement === document.getElementById('location-input')
+                  || document.activeElement.tagName === 'INPUT';
       if (typing) return;
       if (e.key === 'ArrowRight') { next(); return; }
       if (e.key === 'ArrowLeft')  { prev(); return; }
