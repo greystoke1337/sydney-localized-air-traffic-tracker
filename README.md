@@ -13,7 +13,7 @@ Live: [overheadtracker.com](https://www.overheadtracker.com/)
 - Live ADS-B data via [airplanes.live](https://airplanes.live), routed through a self-hosted proxy — no API key needed
 - 15-second auto-refresh with manual override
 - Flight phase detection: LANDING, TAKING OFF, APPROACH, DESCENDING, CLIMBING, OVERHEAD
-- Airline name from ICAO callsign prefix; full aircraft type names (B789 → B787-9, A20N → A320neo, etc.)
+- Airline name from ICAO callsign prefix (passenger, cargo, and specialty operators including RFDS, Cobham, NetJets); full aircraft type names (B789 → B787-9, A20N → A320neo, etc.)
 - Emergency squawk highlighting — 7700 / 7600 / 7500 shown in red with a warning
 - Leaflet map with geofence circle, aircraft dot, and speed-scaled heading vector
 - Aircraft photo from [Planespotters.net](https://planespotters.net) by registration
@@ -84,7 +84,6 @@ const char* PROXY_HOST = "192.168.x.x";  // IP of your local proxy
 
 ## Roadmap
 
-- [ ] Airline logo display
 - [ ] Push notification when a specific flight appears overhead
 
 ---
