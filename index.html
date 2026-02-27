@@ -122,13 +122,6 @@
     .info-route {
       color: #a0d8ef;
     }
-    .airline-logo {
-      height: 18px;
-      margin-left: 8px;
-      vertical-align: middle;
-      opacity: 0.8;
-      filter: brightness(1.05);
-    }
 
     #main { line-height: 1.8; margin-bottom: 12px; font-size: clamp(0.72rem, 2vw, 0.78rem); opacity: 0.85; }
 
@@ -312,7 +305,7 @@
     .vs-descending { color: #ff6060; }
     .vs-level      { color: var(--c-main); }
 
-    .spd-slow   { color: var(--c-dim); }
+    .spd-slow   { color: #ff4040; }
     .spd-normal { color: var(--c-main); }
     .spd-fast   { color: #60e8ff; }
 
@@ -715,24 +708,6 @@
       return AIRLINE_DB[prefix] || prefix || '---';
     }
 
-    // ICAO callsign prefix → IATA 2-letter code (used for airline logo CDN)
-    const AIRLINE_IATA = {
-      QFA:'QF',  VOZ:'VA',  JST:'JQ',  RXA:'ZL',  NWL:'',
-      UAE:'EK',  ETD:'EY',  QTR:'QR',  SIA:'SQ',  MAS:'MH',
-      CPA:'CX',  ANZ:'NZ',  FJI:'FJ',  THA:'TG',  THY:'TK',
-      GIA:'GA',  PAL:'PR',  AIQ:'XJ',  XAX:'D7',  VNA:'VN',
-      EVA:'BR',  CCA:'CA',  CSN:'CZ',  CES:'MU',  KAL:'KE',
-      AAR:'OZ',  ANA:'NH',  JAL:'JL',  AAL:'AA',  UAL:'UA',
-      DAL:'DL',  ACA:'AC',  BAW:'BA',  AFR:'AF',  DLH:'LH',
-      HAL:'HA',
-      UPS:'5X',  FDX:'FX',  GTI:'5Y',  CLX:'CV',
-      GEC:'LH',  DHK:'',    TAY:'3V',  QXE:'QF',
-      FDM:'',    FDQ:'',    NJT:'',    PEL:'',    CAV:'',  HND:'',
-    };
-    function airlineIata(cs) {
-      if (!cs) return '';
-      return AIRLINE_IATA[cs.slice(0, 3).toUpperCase()] || '';
-    }
 
     // ADS-B emitter category codes → plain English
     const CATEGORY_DB = {
@@ -1433,10 +1408,6 @@
       const reg     = (f.r || '---').toUpperCase();
       const sqkStr  = formatSquawk(f.squawk || '---');
       const airline = airlineFromCallsign(call);
-      const iata    = airlineIata(call);
-      const airlineHtml = iata
-        ? airline + '<img class="airline-logo" src="https://pics.avs.io/60/20/' + iata + '.png" alt="" onerror="this.style.display=\'none\'">'
-        : airline;
 
       // Callsign links to FlightAware
       const callLink = call !== '---'
@@ -1470,7 +1441,7 @@
         R('FLIGHT', callLink) +
         R('REG',    reg) +
         R('TYPE',   typeStr) +
-        R('AIRLINE', airlineHtml) +
+        R('AIRLINE', airline) +
         R('PHASE',   phase.color
             ? '<span style="color:' + phase.color + ';">' + phase.label + '</span>'
             : phase.label) +
