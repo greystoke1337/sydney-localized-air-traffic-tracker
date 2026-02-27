@@ -49,9 +49,9 @@ Standalone physical tracker on the **Freenove FNK0103S** (ESP32 + 4" 480×320 ST
 
 **Hardware:** Freenove FNK0103S, optional 3D-printed enclosure (STL/STEP in [`tracker_live_fnk0103s/enclosure/`](tracker_live_fnk0103s/enclosure/))
 
-**What it shows:** callsign, airline, aircraft type, altitude, distance, flight phase. Cycles through overhead flights every 8 seconds. Tap the header to switch between location presets.
+**What it shows:** callsign, airline, aircraft type, altitude, distance, flight phase, route (departure → arrival). Cycles through overhead flights every 8 seconds. Tap the header to switch between location presets.
 
-**Libraries** (Arduino Library Manager): `TFT_eSPI` (Freenove version), `ArduinoJson`, `SD`
+**Libraries** (Arduino Library Manager): `TFT_eSPI` (Freenove version), `ArduinoJson`, `ArduinoOTA`, `SD`
 
 Edit the top of [`tracker_live_fnk0103s/tracker_live_fnk0103s.ino`](tracker_live_fnk0103s/tracker_live_fnk0103s.ino) before flashing:
 
@@ -62,11 +62,14 @@ const char* PROXY_HOST = "192.168.x.x";  // IP of your local proxy
 ```
 
 ```bash
-./build.sh            # compile + upload
+./build.sh            # compile + upload via USB
 ./build.sh compile    # compile only
-./build.sh upload     # upload last build
+./build.sh upload     # upload last build via USB
+./build.sh ota        # compile + upload over Wi-Fi (OTA)
 ./build.sh monitor    # serial monitor
 ```
+
+**Over-the-air updates:** after the first USB flash, the device advertises itself as `overhead-tracker.local` on the local network via mDNS. Run `./build.sh ota` (or press **Ctrl+Shift+B** in VS Code) to compile and upload wirelessly. The TFT displays a green progress bar during the update.
 
 ---
 

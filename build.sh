@@ -2,12 +2,14 @@
 # ─── Overhead Tracker — build / upload helper ─────────────────────────────────
 #
 # Usage (run from project root):
-#   ./build.sh               → compile + auto-detect port + upload
+#   ./build.sh               → compile + auto-detect port + upload via USB
 #   ./build.sh compile       → compile only (error-check)
-#   ./build.sh upload        → upload last build (auto-detect port)
+#   ./build.sh upload        → upload last build via USB (auto-detect port)
 #   ./build.sh upload COM5   → upload last build to a specific port
 #   ./build.sh monitor       → open serial monitor on auto-detected port
 #   ./build.sh monitor COM5  → open serial monitor on specific port
+#   ./build.sh ota           → compile + OTA upload (overhead-tracker.local)
+#   OVERHEAD_TRACKER_IP=x.x.x.x ./build.sh ota  → OTA to specific IP
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -19,6 +21,10 @@ SKETCH="tracker_live_fnk0103s/tracker_live_fnk0103s.ino"
 FQBN="esp32:esp32:esp32"
 BUILD_DIR="/tmp/overhead-tracker-build"
 BAUD=115200
+ESPOTA="/c/Users/maxim/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.7/tools/espota.exe"
+OTA_HOST="${OVERHEAD_TRACKER_IP:-overhead-tracker.local}"
+OTA_PORT=3232
+BIN_FILE="$BUILD_DIR/tracker_live_fnk0103s.ino.bin"
 
 CMD="${1:-all}"
 
@@ -70,6 +76,14 @@ run_upload() {
   info "Upload complete."
 }
 
+# ── OTA Upload ────────────────────────────────────────────────────────────────
+run_ota() {
+  run_compile
+  info "OTA UPLOAD → $OTA_HOST:$OTA_PORT"
+  "$ESPOTA" -i "$OTA_HOST" -p "$OTA_PORT" -f "$BIN_FILE" -r
+  info "OTA upload complete."
+}
+
 # ── Serial monitor ────────────────────────────────────────────────────────────
 run_monitor() {
   local port
@@ -85,6 +99,7 @@ run_monitor() {
 case "$CMD" in
   compile)          run_compile ;;
   upload)           run_upload  "$@" ;;
+  ota)              run_ota ;;
   monitor)          run_monitor "$@" ;;
   all|*)            run_compile && run_upload "$@" ;;
 esac
