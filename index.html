@@ -122,6 +122,13 @@
     .info-route {
       color: #a0d8ef;
     }
+    .airline-logo {
+      height: 18px;
+      margin-left: 8px;
+      vertical-align: middle;
+      opacity: 0.8;
+      filter: brightness(1.05);
+    }
 
     #main { line-height: 1.8; margin-bottom: 12px; font-size: clamp(0.72rem, 2vw, 0.78rem); opacity: 0.85; }
 
@@ -694,11 +701,37 @@
       UAL:'UNITED AIRLINES',DAL:'DELTA AIR LINES',   ACA:'AIR CANADA',
       BAW:'BRITISH AIRWAYS',AFR:'AIR FRANCE',        DLH:'LUFTHANSA',
       HAL:'HAWAIIAN AIRLINES',
+      // Cargo carriers
+      UPS:'UPS AIRLINES',  FDX:'FEDEX EXPRESS',  GTI:'ATLAS AIR',
+      CLX:'CARGOLUX',      GEC:'LUFTHANSA CARGO', DHK:'DHL AIR',
+      TAY:'TNT AIRWAYS',   QXE:'QANTAS FREIGHT',
+      // Australian specialty / charter
+      FDM:'RFDS',          FDQ:'RFDS QUEENSLAND', NJT:'NETJETS',
+      PEL:'PEL-AIR',       CAV:'COBHAM AVIATION', HND:'HINTERLAND AVIATION',
     };
     function airlineFromCallsign(cs) {
       if (!cs || cs === '---') return '---';
       const prefix = cs.match(/^[A-Z]+/)?.[0] || '';
       return AIRLINE_DB[prefix] || prefix || '---';
+    }
+
+    // ICAO callsign prefix → IATA 2-letter code (used for airline logo CDN)
+    const AIRLINE_IATA = {
+      QFA:'QF',  VOZ:'VA',  JST:'JQ',  RXA:'ZL',  NWL:'',
+      UAE:'EK',  ETD:'EY',  QTR:'QR',  SIA:'SQ',  MAS:'MH',
+      CPA:'CX',  ANZ:'NZ',  FJI:'FJ',  THA:'TG',  THY:'TK',
+      GIA:'GA',  PAL:'PR',  AIQ:'XJ',  XAX:'D7',  VNA:'VN',
+      EVA:'BR',  CCA:'CA',  CSN:'CZ',  CES:'MU',  KAL:'KE',
+      AAR:'OZ',  ANA:'NH',  JAL:'JL',  AAL:'AA',  UAL:'UA',
+      DAL:'DL',  ACA:'AC',  BAW:'BA',  AFR:'AF',  DLH:'LH',
+      HAL:'HA',
+      UPS:'5X',  FDX:'FX',  GTI:'5Y',  CLX:'CV',
+      GEC:'LH',  DHK:'',    TAY:'3V',  QXE:'QF',
+      FDM:'',    FDQ:'',    NJT:'',    PEL:'',    CAV:'',  HND:'',
+    };
+    function airlineIata(cs) {
+      if (!cs) return '';
+      return AIRLINE_IATA[cs.slice(0, 3).toUpperCase()] || '';
     }
 
     // ADS-B emitter category codes → plain English
@@ -1400,6 +1433,10 @@
       const reg     = (f.r || '---').toUpperCase();
       const sqkStr  = formatSquawk(f.squawk || '---');
       const airline = airlineFromCallsign(call);
+      const iata    = airlineIata(call);
+      const airlineHtml = iata
+        ? airline + '<img class="airline-logo" src="https://pics.avs.io/60/20/' + iata + '.png" alt="" onerror="this.style.display=\'none\'">'
+        : airline;
 
       // Callsign links to FlightAware
       const callLink = call !== '---'
@@ -1433,7 +1470,7 @@
         R('FLIGHT', callLink) +
         R('REG',    reg) +
         R('TYPE',   typeStr) +
-        R('AIRLINE', airline) +
+        R('AIRLINE', airlineHtml) +
         R('PHASE',   phase.color
             ? '<span style="color:' + phase.color + ';">' + phase.label + '</span>'
             : phase.label) +
