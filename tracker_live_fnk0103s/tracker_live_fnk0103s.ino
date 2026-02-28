@@ -29,11 +29,11 @@ WebServer  setupServer(80);
 DNSServer  dnsServer;
 
 // ─── WiFi (loaded from NVS on boot; defaults used on first flash) ─────────
-char WIFI_SSID[64] = "REDACTED";
-char WIFI_PASS[64] = "REDACTED";
+char WIFI_SSID[64] = "";
+char WIFI_PASS[64] = "";
 
 // ─── Proxy ────────────────────────────────────────────
-const char* PROXY_HOST = "192.168.x.x";
+const char* PROXY_HOST = "";
 const int   PROXY_PORT = 3000;
 
 // ─── SD pin ───────────────────────────────────────────
@@ -64,11 +64,11 @@ const int CYCLE_SECS   = 8;
 #define C_YELLOW  0xFFE0
 
 // ─── Location (defaults — overridden by NVS / config.txt) ────────────────
-float HOME_LAT    = REDACTEDf;
-float HOME_LON    = REDACTEDf;
+float HOME_LAT    = 0.0f;
+float HOME_LON    = 0.0f;
 float GEOFENCE_KM = 10.0f;
 int   ALT_FLOOR_FT = 500;
-char  LOCATION_NAME[32] = "REDACTED";
+char  LOCATION_NAME[32] = "NOT SET";
 char  HOME_QUERY[128]   = "";   // plain-text search; cleared after geocoding
 bool  needsGeocode      = false;
 

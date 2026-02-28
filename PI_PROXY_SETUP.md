@@ -495,8 +495,8 @@ Registered through Cloudflare Registrar.
 |-------|-------------|---------------------------------|-------|
 | CNAME | `@`         | `greystoke1337.github.io`      | On    |
 | CNAME | `www`       | `greystoke1337.github.io`      | On    |
-| CNAME | `api`       | `eca4af72-...cfargotunnel.com` | On    |
-| CNAME | `dashboard` | `eca4af72-...cfargotunnel.com` | On    |
+| CNAME | `api`       | `<your-tunnel-id>.cfargotunnel.com` | On    |
+| CNAME | `dashboard` | `<your-tunnel-id>.cfargotunnel.com` | On    |
 
 ---
 
