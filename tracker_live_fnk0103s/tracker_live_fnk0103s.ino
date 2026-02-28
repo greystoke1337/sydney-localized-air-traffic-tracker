@@ -1750,8 +1750,9 @@ void setup() {
     Serial.println("OTA ready — overhead-tracker.local");
   }
 
-  // Hardware watchdog: reboot if loop() stalls for > 30 s
-  esp_task_wdt_init(30, true);
+  // Hardware watchdog: reboot if loop() stalls for > 30 s (core 3.x struct API)
+  const esp_task_wdt_config_t wdt_cfg = { .timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true };
+  esp_task_wdt_init(&wdt_cfg);
   esp_task_wdt_add(NULL);
 
   if (WiFi.status() != WL_CONNECTED) {
