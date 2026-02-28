@@ -145,7 +145,8 @@ function savePeak() {
   catch(e) { console.error('[PEAK] Save error:', e.message); }
 }
 
-const cache = new Map();
+const cache          = new Map();
+const pendingFetches = new Map();
 
 const startTime = Date.now();
 const stats = {
@@ -229,6 +230,12 @@ app.get('/flights', async (req, res) => {
   const { lat, lon, radius } = req.query;
   if (!lat || !lon || !radius) return res.status(400).json({ error: 'lat, lon, radius required' });
 
+  const latN = parseFloat(lat), lonN = parseFloat(lon), radN = parseFloat(radius);
+  if (isNaN(latN) || isNaN(lonN) || isNaN(radN) ||
+      latN < -90 || latN > 90 || lonN < -180 || lonN > 180 || radN < 0.1 || radN > 500) {
+    return res.status(400).json({ error: 'lat/lon/radius out of range' });
+  }
+
   stats.totalRequests++;
   stats.peakHour[new Date().getHours()]++;
   savePeak();
@@ -245,19 +252,42 @@ app.get('/flights', async (req, res) => {
     return res.json(hit.data);
   }
 
+  // Coalesce simultaneous requests for the same key to avoid thundering herd
+  if (pendingFetches.has(key)) {
+    console.log(`[COALESCED] ${key}`);
+    try {
+      return res.json(await pendingFetches.get(key));
+    } catch(e) {
+      const stale = cache.get(key);
+      if (stale) return res.json({ ...stale.data, stale: true });
+      stats.errors++;
+      return res.status(502).json({ error: 'Upstream unavailable' });
+    }
+  }
+
+  const fetchPromise = fetch(
+    `https://api.airplanes.live/v2/point/${lat}/${lon}/${radius}`,
+    { signal: AbortSignal.timeout(8000) }
+  ).then(r => { if (!r.ok) throw new Error(`API returned ${r.status}`); return r.json(); });
+  pendingFetches.set(key, fetchPromise);
+
   try {
     console.log(`[FETCH] ${key}`);
     stats.cacheMisses++;
-    const url      = `https://api.airplanes.live/v2/point/${lat}/${lon}/${radius}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!response.ok) throw new Error(`API returned ${response.status}`);
-    const data = await response.json();
+    const data = await fetchPromise;
     cache.set(key, { data, timestamp: now });
     res.json(data);
   } catch(e) {
     console.error(`[ERROR] ${e.message}`);
     stats.errors++;
-    res.status(502).json({ error: e.message });
+    const stale = cache.get(key);
+    if (stale) {
+      console.log(`[STALE] ${key}`);
+      return res.json({ ...stale.data, stale: true });
+    }
+    res.status(502).json({ error: 'Upstream unavailable' });
+  } finally {
+    pendingFetches.delete(key);
   }
 });
 
