@@ -3,6 +3,9 @@
     "allow": [
       "Read(//c/Users/maxim/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.7/**)",
       "Read(//c/Users/maxim/.claude/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\maxim\\.claude\\projects\\c--Users-maxim-localized-air-traffic-tracker\\memory"
     ]
   }
 }

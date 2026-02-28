@@ -9,7 +9,7 @@ Written: February 2026 — Updated: February 2026
 
 - **Device:** Raspberry Pi 3B+
 - **OS:** Raspberry Pi OS Lite 64-bit (headless)
-- **Local IP:** 192.168.x.x
+- **Local IP:** 192.168.86.24
 - **Hostname:** piproxy
 
 ---
@@ -51,7 +51,7 @@ From any machine on the local network:
 ```bash
 ssh pi@piproxy.local
 # or
-ssh pi@192.168.x.x
+ssh pi@192.168.86.24
 ```
 
 **Recommended:** Use **VS Code with the Remote SSH extension** for editing files.
@@ -112,253 +112,7 @@ sudo mv cloudflared /usr/local/bin/
 
 **File:** `/home/pi/proxy/server.js`
 
-Includes: caching, stats tracking, peak hour persistence, dashboard serving, and shutdown endpoint.
-
-```javascript
-const express = require('express');
-const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
-const fs = require('fs');
-const path = require('path');
-
-const app       = express();
-const PORT      = 3000;
-const CACHE_MS  = 10000;
-const DATA_DIR  = path.join(__dirname, 'data');
-const PEAK_FILE = path.join(DATA_DIR, 'peak.json');
-
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
-
-// Load persisted peak data or start fresh
-function loadPeak() {
-  try {
-    if (fs.existsSync(PEAK_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(PEAK_FILE, 'utf8'));
-      if (Array.isArray(raw) && raw.length === 24) return raw;
-    }
-  } catch(e) { console.error('[PEAK] Load error:', e.message); }
-  return new Array(24).fill(0);
-}
-
-function savePeak() {
-  try { fs.writeFileSync(PEAK_FILE, JSON.stringify(stats.peakHour)); }
-  catch(e) { console.error('[PEAK] Save error:', e.message); }
-}
-
-const cache          = new Map();
-const pendingFetches = new Map();
-
-const startTime = Date.now();
-const stats = {
-  totalRequests: 0,
-  cacheHits:     0,
-  cacheMisses:   0,
-  errors:        0,
-  peakHour:      loadPeak(),
-  uniqueClients: new Set(),
-};
-
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  next();
-});
-
-// Dashboard HTML
-app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/dashboard.html');
-});
-
-// Stats endpoint
-app.get('/stats', (req, res) => {
-  const uptimeSec = Math.floor((Date.now() - startTime) / 1000);
-  const days  = Math.floor(uptimeSec / 86400);
-  const hours = Math.floor((uptimeSec % 86400) / 3600);
-  const mins  = Math.floor((uptimeSec % 3600) / 60);
-  const hitRate = stats.totalRequests > 0
-    ? ((stats.cacheHits / stats.totalRequests) * 100).toFixed(1)
-    : '0.0';
-
-  res.json({
-    uptime:        `${days}d ${hours}h ${mins}m`,
-    totalRequests: stats.totalRequests,
-    cacheHits:     stats.cacheHits,
-    cacheMisses:   stats.cacheMisses,
-    cacheHitRate:  hitRate + '%',
-    errors:        stats.errors,
-    uniqueClients: stats.uniqueClients.size,
-    cacheEntries:  cache.size,
-    peakHour:      stats.peakHour,
-  });
-});
-
-// Peak hour breakdown endpoint
-app.get('/peak', (req, res) => {
-  const total = stats.peakHour.reduce((a, b) => a + b, 0);
-  const max   = Math.max(...stats.peakHour, 1);
-  const now   = new Date().getHours();
-
-  const hours = stats.peakHour.map((count, i) => ({
-    hour:    i,
-    label:   String(i).padStart(2, '0') + ':00',
-    count,
-    pct:     total > 0 ? ((count / total) * 100).toFixed(1) : '0.0',
-    bar:     Math.round((count / max) * 20),
-    current: i === now,
-  }));
-
-  const peakIdx = stats.peakHour.indexOf(max);
-
-  res.json({
-    hours,
-    total,
-    peakHour:    peakIdx,
-    peakLabel:   String(peakIdx).padStart(2, '0') + ':00',
-    peakCount:   max,
-    currentHour: now,
-  });
-});
-
-// Shutdown endpoint (PM2 will auto-restart)
-app.get('/shutdown', (req, res) => {
-  savePeak();
-  res.json({ message: 'Proxy shutting down...' });
-  setTimeout(() => process.exit(0), 500);
-});
-
-// Flights endpoint
-app.get('/flights', async (req, res) => {
-  const { lat, lon, radius } = req.query;
-  if (!lat || !lon || !radius) return res.status(400).json({ error: 'lat, lon, radius required' });
-
-  const latN = parseFloat(lat), lonN = parseFloat(lon), radN = parseFloat(radius);
-  if (isNaN(latN) || isNaN(lonN) || isNaN(radN) ||
-      latN < -90 || latN > 90 || lonN < -180 || lonN > 180 || radN < 0.1 || radN > 500) {
-    return res.status(400).json({ error: 'lat/lon/radius out of range' });
-  }
-
-  stats.totalRequests++;
-  stats.peakHour[new Date().getHours()]++;
-  savePeak();
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-  stats.uniqueClients.add(ip);
-
-  const key = `${lat},${lon},${radius}`;
-  const now  = Date.now();
-  const hit  = cache.get(key);
-
-  if (hit && (now - hit.timestamp) < CACHE_MS) {
-    console.log(`[CACHE HIT] ${key}`);
-    stats.cacheHits++;
-    return res.json(hit.data);
-  }
-
-  // Coalesce simultaneous requests for the same key to avoid thundering herd
-  if (pendingFetches.has(key)) {
-    console.log(`[COALESCED] ${key}`);
-    try {
-      return res.json(await pendingFetches.get(key));
-    } catch(e) {
-      const stale = cache.get(key);
-      if (stale) return res.json({ ...stale.data, stale: true });
-      stats.errors++;
-      return res.status(502).json({ error: 'Upstream unavailable' });
-    }
-  }
-
-  const fetchPromise = fetch(
-    `https://api.airplanes.live/v2/point/${lat}/${lon}/${radius}`,
-    { signal: AbortSignal.timeout(8000) }
-  ).then(r => { if (!r.ok) throw new Error(`API returned ${r.status}`); return r.json(); });
-  pendingFetches.set(key, fetchPromise);
-
-  try {
-    console.log(`[FETCH] ${key}`);
-    stats.cacheMisses++;
-    const data = await fetchPromise;
-    cache.set(key, { data, timestamp: now });
-    res.json(data);
-  } catch(e) {
-    console.error(`[ERROR] ${e.message}`);
-    stats.errors++;
-    const stale = cache.get(key);
-    if (stale) {
-      console.log(`[STALE] ${key}`);
-      return res.json({ ...stale.data, stale: true });
-    }
-    res.status(502).json({ error: 'Upstream unavailable' });
-  } finally {
-    pendingFetches.delete(key);
-  }
-});
-
-// Weather endpoint — Open-Meteo (cached 10 min)
-const WEATHER_CACHE_MS = 10 * 60 * 1000;
-
-const WMO_CODES = {
-  0: 'Clear Sky', 1: 'Mainly Clear', 2: 'Partly Cloudy', 3: 'Overcast',
-  45: 'Fog', 48: 'Icy Fog',
-  51: 'Light Drizzle', 53: 'Moderate Drizzle', 55: 'Dense Drizzle',
-  61: 'Slight Rain', 63: 'Moderate Rain', 65: 'Heavy Rain',
-  71: 'Slight Snow', 73: 'Moderate Snow', 75: 'Heavy Snow', 77: 'Snow Grains',
-  80: 'Slight Showers', 81: 'Moderate Showers', 82: 'Violent Showers',
-  85: 'Slight Snow Showers', 86: 'Heavy Snow Showers',
-  95: 'Thunderstorm', 96: 'Thunderstorm w/ Hail', 99: 'Thunderstorm w/ Heavy Hail',
-};
-
-function windCardinal(deg) {
-  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  return dirs[Math.round(deg / 45) % 8];
-}
-
-app.get('/weather', async (req, res) => {
-  const { lat, lon } = req.query;
-  if (!lat || !lon) return res.status(400).json({ error: 'lat and lon required' });
-
-  const key = `weather:${lat},${lon}`;
-  const now = Date.now();
-  const hit = cache.get(key);
-
-  if (hit && (now - hit.timestamp) < WEATHER_CACHE_MS) {
-    console.log(`[CACHE HIT] ${key}`);
-    return res.json(hit.data);
-  }
-
-  try {
-    console.log(`[FETCH] ${key}`);
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,` +
-      `wind_speed_10m,wind_direction_10m,uv_index&wind_speed_unit=kmh&timezone=auto`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!response.ok) throw new Error(`Open-Meteo returned ${response.status}`);
-    const raw = await response.json();
-    const c = raw.current;
-    const data = {
-      temp:            c.temperature_2m,
-      feels_like:      c.apparent_temperature,
-      humidity:        c.relative_humidity_2m,
-      weather_code:    c.weather_code,
-      condition:       WMO_CODES[c.weather_code] || 'Unknown',
-      wind_speed:      c.wind_speed_10m,
-      wind_dir:        c.wind_direction_10m,
-      wind_cardinal:   windCardinal(c.wind_direction_10m),
-      uv_index:        c.uv_index,
-      utc_offset_secs: raw.utc_offset_seconds,
-    };
-    cache.set(key, { data, timestamp: now });
-    res.json(data);
-  } catch(e) {
-    console.error(`[ERROR] ${e.message}`);
-    res.status(502).json({ error: e.message });
-  }
-});
-
-// Save peak every 5 minutes as safety net
-setInterval(savePeak, 5 * 60 * 1000);
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Proxy running on port ${PORT}`);
-});
-```
+See [`pi-proxy/server.js`](pi-proxy/server.js).
 
 ---
 
@@ -438,6 +192,8 @@ No X server or desktop environment needed.
 
 Dependencies: `python3-pygame`, `python3-numpy`, `requests`
 
+See [`pi-proxy/display.py`](pi-proxy/display.py).
+
 ### Relevant boot config (`/boot/firmware/config.txt`)
 
 ```
@@ -510,8 +266,8 @@ https://api.overheadtracker.com/weather?lat=LAT&lon=LON
 
 ### ESP32 (.ino)
 ```
-http://192.168.x.x:3000/flights?lat=LAT&lon=LON&radius=RADIUS
-http://192.168.x.x:3000/weather?lat=LAT&lon=LON
+http://192.168.86.24:3000/flights?lat=LAT&lon=LON&radius=RADIUS
+http://192.168.86.24:3000/weather?lat=LAT&lon=LON
 ```
 
 ---
@@ -537,7 +293,7 @@ pm2 status  # verify both are online after reboot
 | Stats all zero after restart | Normal — peak.json restores hourly data but session counts reset |
 | Website shows fetch error | `pm2 status` — is proxy online? |
 | api.overheadtracker.com unreachable | `pm2 logs tunnel` — is tunnel connected? |
-| ESP32 shows HTTP ERR | Is Pi powered on? ping 192.168.x.x |
+| ESP32 shows HTTP ERR | Is Pi powered on? ping 192.168.86.24 |
 | 429 errors from airplanes.live | Cache may have been disabled — check server.js |
 | Tunnel restart count very high | `pm2 logs tunnel --lines 20` — check for auth or memory errors |
 

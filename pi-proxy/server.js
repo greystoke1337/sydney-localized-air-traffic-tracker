@@ -1,0 +1,425 @@
+const express = require('express');
+const fetch   = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+const os      = require('os');
+const fs      = require('fs');
+const { execSync } = require('child_process');
+
+const app      = express();
+const PORT     = 3000;
+const CACHE_MS = 10000;
+
+const cache      = new Map();
+let   proxyEnabled = true; // ← soft on/off toggle
+
+const startTime = Date.now();
+const stats = {
+  totalRequests: 0,
+  cacheHits:     0,
+  errors:        0,
+  peakHour:      new Array(24).fill(0),
+  uniqueClients: new Set(),
+};
+
+// ── Request log (last 100 entries) ──────────────────────────────────
+const requestLog = [];
+function addLog(entry) {
+  requestLog.unshift({ ...entry, time: new Date().toISOString() });
+  if (requestLog.length > 100) requestLog.pop();
+}
+
+function cpuTemp() {
+  try {
+    const raw = fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8');
+    return (parseInt(raw) / 1000).toFixed(1) + '°C';
+  } catch { return 'N/A'; }
+}
+
+function pm2Status() {
+  try {
+    const out = execSync('pm2 jlist', { timeout: 3000 }).toString();
+    return JSON.parse(out).map(p => ({
+      name:     p.name,
+      status:   p.pm2_env.status,
+      uptime:   p.pm2_env.pm_uptime
+        ? Math.floor((Date.now() - p.pm2_env.pm_uptime) / 1000)
+        : null,
+      restarts: p.pm2_env.restart_time,
+    }));
+  } catch { return []; }
+}
+
+function networkInfo() {
+  const ifaces = os.networkInterfaces();
+  const result = {};
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    const ipv4 = (addrs || []).find(a => a.family === 'IPv4' && !a.internal);
+    if (ipv4) result[name] = ipv4.address;
+  }
+  return result;
+}
+
+function formatUptime(secs) {
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.floor(secs % 60);
+  return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + (m ? m + 'm ' : '') + s + 's';
+}
+
+// ── CORS ─────────────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  next();
+});
+
+// ── Toggle endpoint ───────────────────────────────────────────────────
+app.post('/proxy/toggle', (req, res) => {
+  proxyEnabled = !proxyEnabled;
+  addLog({ type: 'SYS', client: req.headers['x-forwarded-for'] || req.socket.remoteAddress, key: 'proxy ' + (proxyEnabled ? 'ENABLED' : 'DISABLED') });
+  res.json({ enabled: proxyEnabled });
+});
+
+// ── Dashboard UI ──────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PIPROXY // DASHBOARD</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      background: #1a0a00; color: #ffa600;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.88rem; padding: 20px;
+      max-width: 700px; margin: 0 auto;
+    }
+    body::after {
+      content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 99;
+      background: repeating-linear-gradient(to bottom, transparent 0px, transparent 3px, rgba(0,0,0,0.05) 3px, rgba(0,0,0,0.05) 4px);
+    }
+    * { text-shadow: 0 0 2px #ffa600, 0 0 8px #ff8000; }
+    h1 { font-size: 1.1rem; margin: 0 0 4px; }
+    .sub { opacity: 0.5; font-size: 0.75rem; margin-bottom: 20px; }
+    hr { border-color: #ffa600; opacity: 0.25; margin: 16px 0; }
+    .section { margin-bottom: 20px; }
+    .section-title { opacity: 0.5; font-size: 0.72rem; margin-bottom: 8px; letter-spacing: 0.1em; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .card { border: 1px solid #7a5200; padding: 10px 12px; background: rgba(255,166,0,0.03); }
+    .card .label { opacity: 0.5; font-size: 0.7rem; margin-bottom: 4px; }
+    .card .value { font-size: 1.05rem; }
+    .badge { display: inline-block; padding: 2px 8px; font-size: 0.72rem; border: 1px solid; }
+    .badge.online  { color: #60ff90; border-color: #60ff90; text-shadow: 0 0 6px #60ff90; }
+    .badge.stopped { color: #ff6060; border-color: #ff6060; text-shadow: 0 0 6px #ff6060; }
+    .badge.errored { color: #ff6060; border-color: #ff6060; text-shadow: 0 0 6px #ff6060; }
+    .log-entry { border-bottom: 1px solid rgba(255,166,0,0.1); padding: 5px 0; font-size: 0.75rem; line-height: 1.6; }
+    .log-entry:last-child { border: none; }
+    .hit  { color: #60ff90; text-shadow: 0 0 6px #60ff90; }
+    .miss { color: #ffa600; }
+    .err  { color: #ff6060; text-shadow: 0 0 6px #ff6060; }
+    .sys  { color: #60c8ff; text-shadow: 0 0 6px #60c8ff; }
+    .ts   { opacity: 0.45; }
+    .pm2-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,166,0,0.1); }
+    .pm2-row:last-child { border: none; }
+    #refresh-note { opacity: 0.4; font-size: 0.7rem; margin-top: 20px; }
+
+    /* Toggle button */
+    #toggle-btn {
+      background: none; border: 1px solid #ffa600; color: #ffa600;
+      font-family: 'Share Tech Mono', monospace; font-size: 0.9rem;
+      padding: 10px 24px; cursor: pointer; margin-bottom: 20px;
+      text-shadow: 0 0 6px #ff8000; min-width: 200px;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    #toggle-btn:hover { background: rgba(255,166,0,0.1); }
+    #toggle-btn.off {
+      border-color: #ff6060; color: #ff6060;
+      text-shadow: 0 0 6px #ff6060;
+    }
+    #proxy-status-label {
+      display: inline-block; margin-left: 12px;
+      font-size: 0.75rem; opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+  <h1>PIPROXY // DASHBOARD</h1>
+  <p class="sub" id="sub">Loading...</p>
+
+  <button id="toggle-btn" onclick="toggleProxy()">⬤ PROXY ON</button>
+  <span id="proxy-status-label"></span>
+
+  <div id="root"></div>
+  <p id="refresh-note"></p>
+
+  <script>
+    let proxyOn = true;
+
+    function fmt(secs) {
+      const d = Math.floor(secs/86400), h = Math.floor((secs%86400)/3600),
+            m = Math.floor((secs%3600)/60), s = Math.floor(secs%60);
+      return (d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+s+'s';
+    }
+
+    function card(label, value) {
+      return '<div class="card"><div class="label">'+label+'</div><div class="value">'+value+'</div></div>';
+    }
+
+    function updateToggleBtn(enabled) {
+      proxyOn = enabled;
+      const btn = document.getElementById('toggle-btn');
+      const lbl = document.getElementById('proxy-status-label');
+      if (enabled) {
+        btn.textContent = '⬤ PROXY ON';
+        btn.classList.remove('off');
+        lbl.textContent = 'clients are being served';
+      } else {
+        btn.textContent = '◯ PROXY OFF';
+        btn.classList.add('off');
+        lbl.textContent = 'returning 503 to all clients';
+      }
+    }
+
+    async function toggleProxy() {
+      try {
+        const res  = await fetch('/proxy/toggle', { method: 'POST' });
+        const data = await res.json();
+        updateToggleBtn(data.enabled);
+      } catch(e) {
+        document.getElementById('proxy-status-label').textContent = 'toggle failed: ' + e.message;
+      }
+    }
+
+    async function load() {
+      try {
+        const res = await fetch('/status');
+        const d   = await res.json();
+        const now = new Date();
+
+        updateToggleBtn(d.proxyEnabled);
+        document.getElementById('sub').textContent =
+          'piproxy.local  ·  ' + now.toLocaleTimeString();
+
+        const pm2Rows = (d.pm2 || []).map(p => {
+          const up  = p.uptime != null ? fmt(p.uptime) : '---';
+          const cls = p.status === 'online' ? 'online' : (p.status === 'stopped' ? 'stopped' : 'errored');
+          return '<div class="pm2-row">'
+            + '<span>' + p.name + '</span>'
+            + '<span><span class="badge ' + cls + '">' + p.status.toUpperCase() + '</span></span>'
+            + '<span style="opacity:0.6">up ' + up + '</span>'
+            + '<span style="opacity:0.6">↺ ' + p.restarts + '</span>'
+            + '</div>';
+        }).join('') || '<span style="opacity:0.5">No PM2 data</span>';
+
+        const netRows = Object.entries(d.network || {}).map(([iface, ip]) =>
+          '<div class="log-entry"><span style="opacity:0.5">'+iface+'</span>&nbsp;&nbsp;'+ip+'</div>'
+        ).join('') || '<span style="opacity:0.5">No interfaces</span>';
+
+        const logRows = (d.log || []).map(e => {
+          const t       = new Date(e.time).toLocaleTimeString();
+          const typeCls = e.type === 'HIT' ? 'hit' : e.type === 'MISS' ? 'miss' : e.type === 'SYS' ? 'sys' : 'err';
+          const client  = e.client || '?';
+          const key     = e.key || e.error || '';
+          return '<div class="log-entry">'
+            + '<span class="ts">'+t+'</span>  '
+            + '<span class="'+typeCls+'">['+e.type+']</span>  '
+            + '<span style="opacity:0.6">'+client+'</span>  '
+            + '<span style="opacity:0.5">'+key+'</span>'
+            + '</div>';
+        }).join('') || '<span style="opacity:0.5">No requests yet.</span>';
+
+        const ram    = d.ram;
+        const ramPct = ram ? Math.round((1 - ram.free / ram.total) * 100) : '?';
+
+        document.getElementById('root').innerHTML =
+          '<div class="section"><div class="section-title">▸ SYSTEM</div>'
+          + '<div class="grid">'
+          + card('PI UPTIME', fmt(d.uptime))
+          + card('CPU TEMP',  d.temp)
+          + card('RAM USED',  ramPct + '% of ' + Math.round(ram.total/1024/1024) + ' MB')
+          + card('LOAD AVG',  (d.loadAvg||[]).map(l=>l.toFixed(2)).join(' / '))
+          + '</div></div>'
+          + '<hr>'
+          + '<div class="section"><div class="section-title">▸ PM2 SERVICES</div>' + pm2Rows + '</div>'
+          + '<hr>'
+          + '<div class="section"><div class="section-title">▸ NETWORK</div>' + netRows + '</div>'
+          + '<hr>'
+          + '<div class="section"><div class="section-title">▸ REQUEST LOG (last 100)</div>' + logRows + '</div>';
+
+        document.getElementById('refresh-note').textContent =
+          'Auto-refreshes every 10s  ·  Last: ' + now.toLocaleTimeString();
+      } catch(e) {
+        document.getElementById('sub').textContent = 'ERROR: ' + e.message;
+      }
+    }
+
+    load();
+    setInterval(load, 10000);
+  </script>
+</body>
+</html>`);
+});
+
+// ── Status API ────────────────────────────────────────────────────────
+app.get('/status', (req, res) => {
+  res.json({
+    proxyEnabled,
+    uptime:  os.uptime(),
+    temp:    cpuTemp(),
+    loadAvg: os.loadavg(),
+    ram:     { total: os.totalmem(), free: os.freemem() },
+    network: networkInfo(),
+    pm2:     pm2Status(),
+    log:     requestLog,
+  });
+});
+
+// ── Flights proxy ─────────────────────────────────────────────────────
+app.get('/flights', async (req, res) => {
+  const client = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?';
+
+  if (!proxyEnabled) {
+    addLog({ type: 'ERR', client, error: 'proxy disabled' });
+    return res.status(503).json({ error: 'Proxy is disabled' });
+  }
+
+  const { lat, lon, radius } = req.query;
+  if (!lat || !lon || !radius) {
+    addLog({ type: 'ERR', client, error: 'missing params' });
+    return res.status(400).json({ error: 'lat, lon, radius required' });
+  }
+
+  const key = `${lat},${lon},${radius}`;
+  const now  = Date.now();
+  const hit  = cache.get(key);
+
+  stats.totalRequests++;
+  stats.peakHour[new Date().getHours()]++;
+  stats.uniqueClients.add(client);
+
+  if (hit && (now - hit.timestamp) < CACHE_MS) {
+    stats.cacheHits++;
+    addLog({ type: 'HIT', client, key });
+    return res.json(hit.data);
+  }
+
+  try {
+    const url      = `https://api.airplanes.live/v2/point/${lat}/${lon}/${radius}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(`API returned ${response.status}`);
+    const data = await response.json();
+    cache.set(key, { data, timestamp: now });
+    addLog({ type: 'MISS', client, key });
+    res.json(data);
+  } catch (e) {
+    stats.errors++;
+    addLog({ type: 'ERR', client, key, error: e.message });
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// ── Stats endpoint (used by display.py) ──────────────────────────────
+app.get('/stats', (req, res) => {
+  const uptimeSec = Math.floor((Date.now() - startTime) / 1000);
+  const hitRate = stats.totalRequests > 0
+    ? ((stats.cacheHits / stats.totalRequests) * 100).toFixed(1)
+    : '0.0';
+  res.json({
+    uptime:        formatUptime(uptimeSec),
+    totalRequests: stats.totalRequests,
+    cacheHits:     stats.cacheHits,
+    cacheHitRate:  hitRate + '%',
+    errors:        stats.errors,
+    uniqueClients: stats.uniqueClients.size,
+    cacheEntries:  cache.size,
+  });
+});
+
+// ── Peak hour endpoint (used by display.py) ───────────────────────────
+app.get('/peak', (req, res) => {
+  const total  = stats.peakHour.reduce((a, b) => a + b, 0);
+  const max    = Math.max(...stats.peakHour, 1);
+  const now    = new Date().getHours();
+  const peakIdx = stats.peakHour.indexOf(Math.max(...stats.peakHour));
+
+  res.json({
+    hours: stats.peakHour.map((count, i) => ({
+      hour:    i,
+      label:   String(i).padStart(2, '0') + ':00',
+      count,
+      pct:     total > 0 ? ((count / total) * 100).toFixed(1) : '0.0',
+      bar:     Math.round((count / max) * 20),
+      current: i === now,
+    })),
+    total,
+    peakHour:    peakIdx,
+    peakLabel:   String(peakIdx).padStart(2, '0') + ':00',
+    peakCount:   stats.peakHour[peakIdx],
+    currentHour: now,
+  });
+});
+
+// ── Weather endpoint (used by ESP32 + web app) ────────────────────────
+const WEATHER_CACHE_MS = 10 * 60 * 1000;
+
+const WMO_CODES = {
+  0: 'Clear Sky', 1: 'Mainly Clear', 2: 'Partly Cloudy', 3: 'Overcast',
+  45: 'Fog', 48: 'Icy Fog',
+  51: 'Light Drizzle', 53: 'Moderate Drizzle', 55: 'Dense Drizzle',
+  61: 'Slight Rain', 63: 'Moderate Rain', 65: 'Heavy Rain',
+  71: 'Slight Snow', 73: 'Moderate Snow', 75: 'Heavy Snow', 77: 'Snow Grains',
+  80: 'Slight Showers', 81: 'Moderate Showers', 82: 'Violent Showers',
+  85: 'Slight Snow Showers', 86: 'Heavy Snow Showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm w/ Hail', 99: 'Thunderstorm w/ Heavy Hail',
+};
+
+function windCardinal(deg) {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+app.get('/weather', async (req, res) => {
+  const { lat, lon } = req.query;
+  if (!lat || !lon) return res.status(400).json({ error: 'lat and lon required' });
+
+  const key = `weather:${lat},${lon}`;
+  const now = Date.now();
+  const hit = cache.get(key);
+
+  if (hit && (now - hit.timestamp) < WEATHER_CACHE_MS) {
+    addLog({ type: 'HIT', client: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?', key });
+    return res.json(hit.data);
+  }
+
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,` +
+      `wind_speed_10m,wind_direction_10m,uv_index&wind_speed_unit=kmh&timezone=auto`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(`Open-Meteo returned ${response.status}`);
+    const raw = await response.json();
+    const c = raw.current;
+    const data = {
+      temp:            c.temperature_2m,
+      feels_like:      c.apparent_temperature,
+      humidity:        c.relative_humidity_2m,
+      weather_code:    c.weather_code,
+      condition:       WMO_CODES[c.weather_code] || 'Unknown',
+      wind_speed:      c.wind_speed_10m,
+      wind_dir:        c.wind_direction_10m,
+      wind_cardinal:   windCardinal(c.wind_direction_10m),
+      uv_index:        c.uv_index,
+      utc_offset_secs: raw.utc_offset_seconds,
+    };
+    cache.set(key, { data, timestamp: now });
+    res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Proxy + dashboard running on port ${PORT}`);
+});

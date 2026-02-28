@@ -23,10 +23,15 @@ Custom domain: https://overheadtracker.com
 ```
 index.html                  # Entire web app (single file, ~120 KB)
 build.sh                    # ESP32 compile + upload helper (arduino-cli)
-PI_PROXY_SETUP.md           # Raspberry Pi proxy setup guide + full server source
+PI_PROXY_SETUP.md           # Raspberry Pi proxy setup guide
 SPEC.md                     # Product specification and feature matrix
 README.md                   # User-facing documentation
 CNAME                       # GitHub Pages custom domain
+pi-proxy/                   # Raspberry Pi proxy source
+  server.js                 # Node.js caching proxy + dashboard (advanced version)
+  display.py                # Pygame TFT display (480×320, writes to /dev/fb1)
+  dashboard.html            # Legacy dashboard UI (used by older server)
+  package.json              # Node deps (express, node-fetch)
 tracker_live_fnk0103s/      # ESP32 hardware project
   tracker_live_fnk0103s.ino # Arduino firmware (~67 KB)
   enclosure/                # 3D-printable case files (STL/STEP)

@@ -23,17 +23,18 @@
 #include <DNSServer.h>
 #include <ArduinoOTA.h>
 #include <esp_task_wdt.h>
+#include "secrets.h"
 
 TFT_eSPI   tft = TFT_eSPI();
 WebServer  setupServer(80);
 DNSServer  dnsServer;
 
 // ─── WiFi (loaded from NVS on boot; defaults used on first flash) ─────────
-char WIFI_SSID[64] = "";
-char WIFI_PASS[64] = "";
+char WIFI_SSID[64] = WIFI_SSID_DEFAULT;
+char WIFI_PASS[64] = WIFI_PASS_DEFAULT;
 
 // ─── Proxy ────────────────────────────────────────────
-const char* PROXY_HOST = "";
+const char* PROXY_HOST = "192.168.86.24";
 const int   PROXY_PORT = 3000;
 
 // ─── SD pin ───────────────────────────────────────────
@@ -1245,21 +1246,27 @@ void renderMessage(const char* line1, const char* line2 = nullptr) {
 
 // ─── Parse a String payload (proxy or cache) ──────────
 int extractFlights(DynamicJsonDocument& doc);
-int parsePayload(const String& payload) {
+int parsePayload(String& payload) {
   StaticJsonDocument<300> filter;
   JsonObject af = filter["ac"].createNestedObject();
   af["flight"] = af["r"] = af["t"] = af["lat"] = af["lon"] =
   af["alt_baro"] = af["gs"] = af["baro_rate"] = af["track"] =
   af["squawk"] = af["dep"] = af["arr"] = af["orig_iata"] = af["dest_iata"] = true;
   Serial.printf("[MEM] Before JSON alloc: %d free\n", ESP.getFreeHeap());
-  DynamicJsonDocument doc(32768);
-  DeserializationError err = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+  DynamicJsonDocument doc(16384);
+  // In-situ parse: ArduinoJSON modifies the buffer in-place and stores string
+  // pointers into it rather than copying — doc memory usage is ~half of copy mode.
+  DeserializationError err = deserializeJson(doc, &payload[0], payload.length(), DeserializationOption::Filter(filter));
   Serial.printf("[MEM] After JSON parse: %d free\n", ESP.getFreeHeap());
   if (err) {
     Serial.printf("JSON parse error: %s\n", err.c_str());
     return -1;
   }
-  return extractFlights(doc);
+  int result = extractFlights(doc);
+  // Free doc before returning, then free the source buffer in caller
+  doc.clear();
+  payload = String();  // release the source buffer now that doc is done with it
+  return result;
 }
 
 // ─── Fetch: proxy (returns small String) ──────────────
