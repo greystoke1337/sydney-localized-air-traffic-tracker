@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TFT Preview — Overhead Tracker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a08;
+    color: #ffa200;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    gap: 32px;
+    padding: 24px;
+    min-height: 100vh;
+    align-items: flex-start;
+  }
+
+  #screen-wrap {
+    flex-shrink: 0;
+    position: relative;
+    border: 2px solid #3a2000;
+    box-shadow: 0 0 30px rgba(255,162,0,0.15), inset 0 0 20px rgba(0,0,0,0.5);
+    border-radius: 4px;
+  }
+  #screen-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 3px,
+      rgba(0,0,0,0.12) 3px,
+      rgba(0,0,0,0.12) 4px
+    );
+    pointer-events: none;
+    border-radius: 4px;
+  }
+  canvas {
+    display: block;
+    width: 960px;
+    height: 640px;
+    image-rendering: pixelated;
+  }
+
+  #controls {
+    flex: 1;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #controls h2 {
+    font-size: 16px;
+    color: #ffa200;
+    border-bottom: 1px solid #3a2000;
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+  }
+  .ctl-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ctl-row label {
+    width: 90px;
+    font-size: 12px;
+    color: #7b2800;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .ctl-row select, .ctl-row input[type=text] {
+    flex: 1;
+    background: #181008;
+    color: #ffa200;
+    border: 1px solid #3a2000;
+    padding: 4px 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+  }
+  .ctl-row input[type=range] {
+    flex: 1;
+    accent-color: #ffa200;
+  }
+  .ctl-row .val {
+    width: 70px;
+    text-align: right;
+    font-size: 12px;
+    color: #ffa200;
+  }
+  #info {
+    margin-top: 12px;
+    font-size: 11px;
+    color: #7b2800;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<div id="screen-wrap">
+  <canvas id="tft" width="480" height="320"></canvas>
+</div>
+
+<div id="controls">
+  <h2>FLIGHT DATA</h2>
+
+  <div class="ctl-row">
+    <label>Callsign</label>
+    <input type="text" id="ctl-callsign" value="QFA1" maxlength="11">
+  </div>
+  <div class="ctl-row">
+    <label>Registration</label>
+    <input type="text" id="ctl-reg" value="VH-OQA" maxlength="11">
+  </div>
+  <div class="ctl-row">
+    <label>Type</label>
+    <select id="ctl-type">
+      <option value="B738">B737-800</option>
+      <option value="A320">A320</option>
+      <option value="B789" selected>B787-9</option>
+      <option value="A380">A380</option>
+      <option value="B77W">B777-300ER</option>
+      <option value="DH8D">Dash 8-400</option>
+      <option value="C208">Cessna Caravan</option>
+      <option value="ZZZZ">UNKNOWN</option>
+    </select>
+  </div>
+  <div class="ctl-row">
+    <label>Phase</label>
+    <select id="ctl-phase">
+      <option value="0">TAKING OFF</option>
+      <option value="1">CLIMBING</option>
+      <option value="2" selected>CRUISING</option>
+      <option value="3">DESCENDING</option>
+      <option value="4">APPROACH</option>
+      <option value="5">LANDING</option>
+      <option value="6">OVERHEAD</option>
+      <option value="7">UNKNOWN</option>
+    </select>
+  </div>
+  <div class="ctl-row">
+    <label>Squawk</label>
+    <select id="ctl-squawk">
+      <option value="1200" selected>1200 (Normal)</option>
+      <option value="7700">7700 (MAYDAY)</option>
+      <option value="7600">7600 (NORDO)</option>
+      <option value="7500">7500 (HIJACK)</option>
+    </select>
+  </div>
+  <div class="ctl-row">
+    <label>Route</label>
+    <select id="ctl-route">
+      <option value="YSSY,YMML" selected>Sydney > Melbourne</option>
+      <option value="YSSY,YPPH">Sydney > Perth</option>
+      <option value="VVTS,NZCH">Ho Chi Minh > Christchurch</option>
+      <option value="KJFK,EGLL">New York > London</option>
+      <option value="YSSY,">Sydney > ???</option>
+      <option value=",">No route data</option>
+    </select>
+  </div>
+
+  <h2>TELEMETRY</h2>
+
+  <div class="ctl-row">
+    <label>Altitude</label>
+    <input type="range" id="ctl-alt" min="0" max="45000" step="500" value="35000">
+    <span class="val" id="val-alt">FL350</span>
+  </div>
+  <div class="ctl-row">
+    <label>Speed</label>
+    <input type="range" id="ctl-speed" min="0" max="600" step="10" value="460">
+    <span class="val" id="val-speed">460 KT</span>
+  </div>
+  <div class="ctl-row">
+    <label>V/Rate</label>
+    <input type="range" id="ctl-vs" min="-3000" max="3000" step="100" value="0">
+    <span class="val" id="val-vs">0 FPM</span>
+  </div>
+  <div class="ctl-row">
+    <label>Distance</label>
+    <input type="range" id="ctl-dist" min="0.5" max="50" step="0.5" value="8.5">
+    <span class="val" id="val-dist">8.5 KM</span>
+  </div>
+
+  <h2>DISPLAY</h2>
+
+  <div class="ctl-row">
+    <label>Flights</label>
+    <input type="range" id="ctl-count" min="1" max="10" step="1" value="3">
+    <span class="val" id="val-count">3</span>
+  </div>
+  <div class="ctl-row">
+    <label>Flight #</label>
+    <input type="range" id="ctl-index" min="1" max="10" step="1" value="1">
+    <span class="val" id="val-index">1</span>
+  </div>
+
+  <div id="info">
+    Canvas: 480x320 (2x scaled)<br>
+    Layout: HDR 28 + NAV 36 + CONTENT 236 + FOOT 20<br>
+    Dashboard: 75px tall, starts at Y=225
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('tft');
+const ctx = canvas.getContext('2d');
+
+// ─── Layout constants (must match firmware) ────────────
+const W = 480, H = 320;
+const HDR_H = 28, NAV_H = 36, FOOT_H = 20;
+const CONTENT_Y = HDR_H + NAV_H;   // 64
+const NAV_Y = HDR_H;               // 28
+const NAV_BTN_W = 70, NAV_BTN_H = NAV_H - 4;
+const NAV_BTN_GAP = 4;
+const CFG_BTN_X1 = W - NAV_BTN_W;                           // 410
+const GEO_BTN_X1 = CFG_BTN_X1 - NAV_BTN_GAP - NAV_BTN_W;   // 336
+const WX_BTN_X1  = GEO_BTN_X1 - NAV_BTN_GAP - NAV_BTN_W;   // 262
+
+// ─── RGB565 → CSS hex ──────────────────────────────────
+const C_BG     = '#080400';
+const C_AMBER  = '#FFA200';
+const C_DIM    = '#7B2800';
+const C_DIMMER = '#392000';
+const C_GREEN  = '#00FF00';
+const C_RED    = '#FF0000';
+const C_CYAN   = '#00FFFF';
+const C_YELLOW = '#FFFF00';
+const C_ORANGE = '#FF8D00';
+const C_GOLD   = '#FFCE42';
+
+// ─── TFT_eSPI canvas shim ─────────────────────────────
+const tft = {
+  _cx: 0, _cy: 0, _sz: 1, _fg: C_AMBER, _bg: null,
+
+  fillRect(x, y, w, h, c) {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  },
+  drawFastHLine(x, y, w, c) { this.fillRect(x, y, w, 1, c); },
+  drawFastVLine(x, y, h, c) { this.fillRect(x, y, 1, h, c); },
+  setCursor(x, y) { this._cx = x; this._cy = y; },
+  setTextSize(s)  { this._sz = s; },
+  setTextColor(fg, bg) { this._fg = fg; this._bg = bg !== undefined ? bg : null; },
+  print(text) {
+    const s = this._sz;
+    const cw = 6 * s, ch = 8 * s;
+    const str = String(text);
+    ctx.font = `bold ${ch}px "Courier New", monospace`;
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < str.length; i++) {
+      if (this._bg) {
+        ctx.fillStyle = this._bg;
+        ctx.fillRect(this._cx, this._cy, cw, ch);
+      }
+      ctx.fillStyle = this._fg;
+      ctx.fillText(str[i], this._cx + 1, this._cy);
+      this._cx += cw;
+    }
+  }
+};
+
+// ─── Lookup tables (ported from firmware) ──────────────
+const AIRLINES = {
+  QFA:'QANTAS', VOZ:'VIRGIN', JST:'JETSTAR', RXA:'REX',
+  UAE:'EMIRATES', ETD:'ETIHAD', QTR:'QATAR', SIA:'SINGAPORE',
+  ANZ:'AIR NZ', CPA:'CATHAY', MAS:'MALAYSIA', THA:'THAI',
+  KAL:'KOREAN', JAL:'JAL', ANA:'ANA', AAL:'AMERICAN',
+  UAL:'UNITED', BAW:'BRITISH', DAL:'DELTA', AFR:'AIR FRANCE',
+  DLH:'LUFTHANSA', NWL:'NETWORK', FJI:'FIJI', EVA:'EVA AIR',
+  CCA:'AIR CHINA', CSN:'CHINA STH', CES:'CHINA EST', HAL:'HAWAIIAN'
+};
+
+const AIRCRAFT_TYPES = {
+  B737:'B737-700', B738:'B737-800', B739:'B737-900', B73X:'B737-900ER',
+  B37M:'B737 MAX 7', B38M:'B737 MAX 8', B39M:'B737 MAX 9', B3XM:'B737 MAX 10',
+  B752:'B757-200', B753:'B757-300', B762:'B767-200', B763:'B767-300', B764:'B767-400',
+  B772:'B777-200', B77L:'B777-200LR', B773:'B777-300', B77W:'B777-300ER',
+  B788:'B787-8', B789:'B787-9', B78X:'B787-10', B712:'B717-200',
+  B741:'B747-100', B742:'B747-200', B743:'B747-300', B744:'B747-400', B748:'B747-8',
+  A318:'A318', A319:'A319', A320:'A320', A321:'A321',
+  A19N:'A319neo', A20N:'A320neo', A21N:'A321neo', A21X:'A321XLR',
+  A332:'A330-200', A333:'A330-300', A338:'A330-800neo', A339:'A330-900neo',
+  A342:'A340-200', A343:'A340-300', A345:'A340-500', A346:'A340-600',
+  A359:'A350-900', A35K:'A350-1000', A380:'A380', A388:'A380-800',
+  E170:'E170', E175:'E175', E190:'E190', E195:'E195',
+  DH8A:'Dash 8-100', DH8B:'Dash 8-200', DH8C:'Dash 8-300', DH8D:'Dash 8-400',
+  AT76:'ATR 72-600', BCS1:'A220-100', BCS3:'A220-300',
+  C208:'Cessna Caravan', PC12:'Pilatus PC-12',
+  GL5T:'G550', GLF6:'G650', C130:'C-130 Hercules', P8:'P-8 Poseidon'
+};
+
+const AIRPORTS = {
+  YSSY:'Sydney', YMML:'Melbourne', YBBN:'Brisbane', YPPH:'Perth',
+  YPAD:'Adelaide', YSCB:'Canberra', YBCS:'Cairns',
+  NZAA:'Auckland', NZCH:'Christchurch', NZWN:'Wellington', NZQN:'Queenstown',
+  WSSS:'Singapore', VHHH:'Hong Kong', RJAA:'Tokyo', RJTT:'Tokyo',
+  RKSI:'Seoul', RCTP:'Taipei', VTBS:'Bangkok', WMKK:'K.Lumpur',
+  WADD:'Bali', WIII:'Jakarta', RPLL:'Manila',
+  VVTS:'Ho Chi Minh', VVNB:'Hanoi', ZBAA:'Beijing', ZSPD:'Shanghai',
+  OMDB:'Dubai', OMAA:'Abu Dhabi', OTHH:'Doha',
+  VIDP:'Delhi', VABB:'Mumbai',
+  EGLL:'London', EGKK:'London', LFPG:'Paris', EHAM:'Amsterdam',
+  EDDF:'Frankfurt', LEMD:'Madrid', LEBL:'Barcelona', LIRF:'Rome', LTFM:'Istanbul',
+  KJFK:'New York', KLAX:'L.A.', KSFO:'S.F.', KORD:'Chicago',
+  KATL:'Atlanta', KDFW:'Dallas', KDEN:'Denver', KSEA:'Seattle',
+  CYYZ:'Toronto', CYVR:'Vancouver',
+  FAOR:"J'burg", FACT:'Cape Town', HECA:'Cairo'
+};
+
+function getAirline(cs) {
+  if (!cs) return '';
+  const prefix = cs.substring(0, 3);
+  return AIRLINES[prefix] || '';
+}
+
+function getAircraftTypeName(code) {
+  if (!code) return '---';
+  return AIRCRAFT_TYPES[code] || code;
+}
+
+function airportCity(code) {
+  if (!code) return null;
+  return AIRPORTS[code] || code;
+}
+
+function formatRoute(dep, arr) {
+  if (!dep && !arr) return null;
+  const d = dep ? (airportCity(dep) || '?') : '?';
+  const a = arr ? (airportCity(arr) || '?') : '?';
+  return d + ' > ' + a;
+}
+
+function formatAlt(alt) {
+  if (alt <= 0) return '---';
+  if (alt >= 10000) return 'FL' + String(Math.floor(alt / 100)).padStart(3, '0');
+  return alt + ' FT';
+}
+
+const STATUS_LABELS = ['TAKING OFF','CLIMBING','CRUISING','DESCENDING','APPROACH','LANDING','OVERHEAD','UNKNOWN'];
+const STATUS_COLORS = [C_GREEN, C_GREEN, C_AMBER, C_ORANGE, C_GOLD, C_RED, C_CYAN, C_DIM];
+
+function statusLabel(s) { return STATUS_LABELS[s] || 'UNKNOWN'; }
+function statusColor(s) { return STATUS_COLORS[s] || C_DIM; }
+
+// ─── Rendering functions (with FIXED layout) ──────────
+
+function drawHeader() {
+  tft.fillRect(0, 0, W, HDR_H, C_AMBER);
+  tft.setTextColor(C_BG, C_AMBER);
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print('OVERHEAD TRACKER');
+  const loc = 'SYDNEY';
+  const locW = loc.length * 12;
+  tft.setCursor(W - locW - 8, 6);
+  tft.print(loc);
+}
+
+function drawNavBar(flightIndex, flightCount) {
+  tft.fillRect(0, NAV_Y, W, NAV_H, C_BG);
+  tft.drawFastHLine(0, NAV_Y, W, C_DIMMER);
+
+  // Flight index indicator
+  if (flightCount > 0) {
+    const navBuf = '< ' + (flightIndex + 1) + '/' + flightCount + ' >';
+    tft.setTextSize(2);
+    tft.setTextColor(C_DIM, C_BG);
+    tft.setCursor(8, NAV_Y + 10);
+    tft.print(navBuf);
+  }
+
+  // WX button
+  tft.fillRect(WX_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, C_DIMMER);
+  tft.setTextColor(C_DIM, C_DIMMER);
+  tft.setTextSize(2);
+  tft.setCursor(WX_BTN_X1 + (NAV_BTN_W - 24) / 2, NAV_Y + 10);
+  tft.print('WX');
+
+  // GEO button
+  const geoLabel = '10KM';
+  const geoW = geoLabel.length * 12;
+  tft.fillRect(GEO_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, C_DIMMER);
+  tft.setTextColor(C_DIM, C_DIMMER);
+  tft.setCursor(GEO_BTN_X1 + (NAV_BTN_W - geoW) / 2, NAV_Y + 10);
+  tft.print(geoLabel);
+
+  // CFG button
+  tft.fillRect(CFG_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, C_DIMMER);
+  tft.setTextColor(C_DIM, C_DIMMER);
+  const cfgLabel = 'CFG';
+  const cfgW = cfgLabel.length * 12;
+  tft.setCursor(CFG_BTN_X1 + (NAV_BTN_W - cfgW) / 2, NAV_Y + 10);
+  tft.print(cfgLabel);
+}
+
+function drawStatusBar(flightIndex, flightCount) {
+  const y = H - FOOT_H;
+  tft.fillRect(0, y, W, FOOT_H, C_BG);
+  tft.drawFastHLine(0, y, W, C_DIMMER);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setTextSize(1);
+  const buf = '  AC ' + (flightIndex+1) + '/' + flightCount + '   SRC:PROXY   NEXT:15s';
+  tft.setCursor(6, y + 6);
+  tft.print(buf);
+}
+
+function renderFlight(f, flightIndex, flightCount) {
+  // Clear everything
+  tft.fillRect(0, 0, W, H, C_BG);
+
+  drawHeader();
+  drawNavBar(flightIndex, flightCount);
+
+  // Clear content area
+  tft.fillRect(0, CONTENT_Y, W, H - HDR_H - NAV_H - FOOT_H, C_BG);
+
+  // Emergency squawk banner
+  const hasEmergency = f.squawk === '7700' || f.squawk === '7600' || f.squawk === '7500';
+  let emergOffset = 0;
+  if (hasEmergency) {
+    const emergLabel = f.squawk === '7700' ? 'EMERGENCY - MAYDAY' :
+                       f.squawk === '7600' ? 'EMERGENCY - NORDO'  :
+                                              'EMERGENCY - HIJACK';
+    tft.fillRect(0, CONTENT_Y, W, 24, C_RED);
+    tft.setTextColor(C_BG, C_RED);
+    tft.setTextSize(2);
+    const lblW = emergLabel.length * 12;
+    tft.setCursor(Math.floor((W - lblW) / 2), CONTENT_Y + 4);
+    tft.print(emergLabel);
+    emergOffset = 24;
+  }
+
+  const x = 15;
+  let y = CONTENT_Y + emergOffset + 4;    // FIXED: was +6
+
+  // 1. CALLSIGN (adaptive size for emergency)
+  const csSize = hasEmergency ? 3 : 4;    // FIXED: smaller in emergency
+  tft.setTextSize(csSize);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(x, y);
+  tft.print(f.callsign || 'SEARCHING');
+
+  y += csSize * 8;                         // FIXED: dynamic advance
+
+  // AIRLINE (skip in emergency mode)
+  if (!hasEmergency) {
+    const al = getAirline(f.callsign);
+    tft.setTextSize(2);
+    tft.setTextColor(al ? C_AMBER : C_DIM, C_BG);
+    tft.setCursor(x, y);
+    tft.print(al || 'UNKNOWN AIRLINE');
+    y += 20;                               // FIXED: was 30
+  } else {
+    y += 8;
+  }
+
+  // 2. AIRCRAFT TYPE & REG
+  tft.drawFastHLine(10, y, W - 20, C_DIMMER);
+  y += 8;                                  // FIXED: was 10
+
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(x, y);
+  tft.print('AIRCRAFT TYPE');
+  tft.setCursor(W/2 + 20, y);
+  tft.print('REGISTRATION');
+
+  y += 10;
+  tft.setTextSize(2);
+  tft.setTextColor(C_CYAN, C_BG);
+  tft.setCursor(x, y);
+  tft.print(getAircraftTypeName(f.type));
+
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(W/2 + 20, y);
+  tft.print(f.reg || '---');
+
+  // 3. ROUTE SECTION
+  y += 20;                                 // FIXED: was 28
+  tft.drawFastHLine(10, y, W - 20, C_DIMMER);
+  y += 8;                                  // FIXED: was 10
+
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(x, y);
+  tft.print('ROUTE');
+
+  y += 10;
+  const route = formatRoute(f.dep, f.arr);
+  if (route) {
+    tft.setTextSize(2);                    // FIXED: always size 2
+    tft.setTextColor(C_YELLOW, C_BG);
+    tft.setCursor(x, y);
+    tft.print(route);
+  } else {
+    tft.setTextSize(2);                    // FIXED: was 3
+    tft.setTextColor(C_DIMMER, C_BG);
+    tft.setCursor(x, y);
+    tft.print('NO ROUTE DATA');
+  }
+
+  // 4. DASHBOARD (75px tall — FIXED: was 85px)
+  const dashY = H - FOOT_H - 75;          // FIXED: 225 (was 215)
+  tft.drawFastHLine(0, dashY, W, C_DIM);
+
+  // Phase Block (0-120)
+  const sCol = statusColor(f.status);
+  tft.fillRect(0, dashY + 1, 4, 74, sCol);           // FIXED: was 84
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(12, dashY + 8);                       // FIXED: was +10
+  tft.print('PHASE');
+  tft.setTextSize(2);
+  tft.setTextColor(sCol, C_BG);
+  tft.setCursor(12, dashY + 24);                      // FIXED: was +28
+  tft.print(statusLabel(f.status));
+
+  // Squawk (below phase)
+  const emerg = f.squawk === '7700' || f.squawk === '7600' || f.squawk === '7500';
+  const sqLabel = f.squawk === '7700' ? 'MAYDAY' : f.squawk === '7600' ? 'NORDO' : f.squawk === '7500' ? 'HIJACK' : f.squawk;
+  tft.setTextColor(emerg ? C_RED : C_DIM, C_BG);
+  tft.setTextSize(1);
+  tft.setCursor(12, dashY + 44);                      // FIXED: was +52
+  tft.print('SQK ' + sqLabel);
+
+  // Altitude Block (120-240)
+  const altBuf = formatAlt(f.alt);
+  tft.drawFastVLine(120, dashY + 5, 65, C_DIMMER);   // FIXED: was 75
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(132, dashY + 8);                      // FIXED: was +10
+  tft.print('ALTITUDE');
+  tft.setTextSize(2);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(132, dashY + 24);                     // FIXED: was +30
+  tft.print(altBuf);
+
+  // Vertical rate
+  tft.setTextSize(1);
+  if (Math.abs(f.vs) >= 50) {
+    let vsBuf;
+    if (f.vs > 0) {
+      vsBuf = '+' + f.vs + ' FPM';
+      tft.setTextColor(C_GREEN, C_BG);
+    } else {
+      vsBuf = f.vs + ' FPM';
+      tft.setTextColor(C_RED, C_BG);
+    }
+    tft.setCursor(132, dashY + 44);                   // FIXED: was +52
+    tft.print(vsBuf);
+  } else {
+    tft.setTextColor(C_AMBER, C_BG);
+    tft.setCursor(132, dashY + 44);                   // FIXED: was +52
+    tft.print('LEVEL');
+  }
+
+  // Speed Block (240-360)
+  tft.drawFastVLine(240, dashY + 5, 65, C_DIMMER);   // FIXED: was 75
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(252, dashY + 8);                      // FIXED: was +10
+  tft.print('SPEED');
+  tft.setTextSize(2);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(252, dashY + 24);                     // FIXED: was +30
+  if (f.speed > 0) {
+    tft.print(String(f.speed));
+    tft.setTextSize(1);
+    tft.print(' KT');
+  } else {
+    tft.print('---');
+  }
+
+  // Distance Block (360-480)
+  tft.drawFastVLine(360, dashY + 5, 65, C_DIMMER);   // FIXED: was 75
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(372, dashY + 8);                      // FIXED: was +10
+  tft.print('DISTANCE');
+  tft.setTextSize(2);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(372, dashY + 24);                     // FIXED: was +30
+  if (f.dist > 0) {
+    const distStr = f.dist >= 10 ? f.dist.toFixed(0) : f.dist.toFixed(1);
+    tft.print(distStr);
+    tft.setTextSize(1);
+    tft.print(' KM');
+  } else {
+    tft.print('---');
+  }
+
+  drawStatusBar(flightIndex, flightCount);
+
+  // Debug: draw layout guide lines (subtle)
+  // Uncomment to see zone boundaries:
+  // ctx.strokeStyle = 'rgba(255,0,0,0.3)';
+  // ctx.strokeRect(0, dashY, W, 75);
+}
+
+// ─── Controls wiring ───────────────────────────────────
+
+function readControls() {
+  const routeParts = document.getElementById('ctl-route').value.split(',');
+  const alt = parseInt(document.getElementById('ctl-alt').value);
+  const speed = parseInt(document.getElementById('ctl-speed').value);
+  const vs = parseInt(document.getElementById('ctl-vs').value);
+  const dist = parseFloat(document.getElementById('ctl-dist').value);
+
+  // Update value labels
+  document.getElementById('val-alt').textContent = formatAlt(alt);
+  document.getElementById('val-speed').textContent = speed + ' KT';
+  document.getElementById('val-vs').textContent = (vs > 0 ? '+' : '') + vs + ' FPM';
+  document.getElementById('val-dist').textContent = dist.toFixed(1) + ' KM';
+  document.getElementById('val-count').textContent = document.getElementById('ctl-count').value;
+  document.getElementById('val-index').textContent = document.getElementById('ctl-index').value;
+
+  return {
+    callsign: document.getElementById('ctl-callsign').value.toUpperCase(),
+    reg: document.getElementById('ctl-reg').value.toUpperCase(),
+    type: document.getElementById('ctl-type').value,
+    status: parseInt(document.getElementById('ctl-phase').value),
+    squawk: document.getElementById('ctl-squawk').value,
+    dep: routeParts[0] || '',
+    arr: routeParts[1] || '',
+    alt: alt,
+    speed: speed,
+    vs: vs,
+    dist: dist,
+    track: 180
+  };
+}
+
+function render() {
+  const f = readControls();
+  const count = parseInt(document.getElementById('ctl-count').value);
+  const index = parseInt(document.getElementById('ctl-index').value) - 1;
+  renderFlight(f, index, count);
+}
+
+// Attach listeners
+document.querySelectorAll('#controls select, #controls input').forEach(el => {
+  el.addEventListener('change', render);
+  el.addEventListener('input', render);
+});
+
+// Initial render
+render();
+</script>
+
+</body>
+</html>

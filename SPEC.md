@@ -53,7 +53,7 @@ FlightRadar24 and similar apps show the whole world — you have to go find your
 | **Location** | Worldwide search, persisted in `localStorage`, shareable via `?location=` URL param |
 | **Filtering** | Geofence radius slider (2–20 km), altitude floor slider (200–5,000 ft) |
 | **Flight data** | Callsign, airline name (from ICAO prefix), full aircraft type name, altitude (FL or QNH ft), ground speed, heading, vertical rate |
-| **Flight phase** | TAKING OFF / CLIMBING / CRUISING / DESCENDING / APPROACH / LANDING / OVERHEAD — derived from altitude + vertical speed |
+| **Flight phase** | TAKING OFF / CLIMBING / DESCENDING / APPROACH / LANDING / OVERHEAD — 6 phases derived from altitude + vertical speed (ESP32 adds CRUISING and UNKNOWN for 8 total) |
 | **Map** | Leaflet with dark CartoDB tiles, geofence circle, aircraft dot, dashed line to location, speed-scaled heading vector with chevron |
 | **Photo** | Aircraft registration photo from Planespotters.net, with halftone overlay |
 | **Alerts** | Emergency squawk highlighting (7700/7600/7500), optional radar ping sound on new #1 aircraft |
@@ -65,8 +65,10 @@ FlightRadar24 and similar apps show the whole world — you have to go find your
 | Category | Features |
 |---|---|
 | **Config** | Captive portal on first boot — set Wi-Fi SSID/password and location; geocodes via Nominatim and stores to NVS |
-| **Display** | Callsign, airline, aircraft type, altitude, distance, flight phase on a 480×320 TFT at 15s refresh / 8s cycle |
-| **Touch** | GEO pill cycles geofence (5K / 10K / 50K); CFG pill opens captive portal |
+| **Display** | Structured layout: header, nav bar, flight card, 4-column dashboard (PHASE / ALT+v/rate / SPEED / DIST), footer. 480×320 TFT at 15s refresh / 8s cycle. Route display (departure > arrival) with city names from built-in airport lookup table. 8 flight phases (TAKING OFF / CLIMBING / CRUISING / DESCENDING / APPROACH / LANDING / OVERHEAD / UNKNOWN), each with a distinct color applied to the phase dashboard column. Emergency squawk banners (7700/7600/7500) trigger a flashing red alert with compact layout. |
+| **Touch** | Nav bar with three touch buttons: WX (weather screen), GEO (cycles geofence: 5 km / 10 km / 50 km), CFG (opens captive portal) |
+| **Weather** | Temperature, humidity, wind speed/direction, conditions — accessed via WX button; data from Open-Meteo via Pi proxy, refreshed every 15 minutes |
+| **Preview** | `tft-preview.html` — browser-based canvas simulator that mirrors firmware rendering; verify layout changes before flashing |
 | **Resilience** | Falls back from proxy → direct API → SD card cache (`cache.json`) |
 
 ---
@@ -87,4 +89,4 @@ FlightRadar24 and similar apps show the whole world — you have to go find your
 
 - **Web app** — `git push` to `main`; GitHub Pages auto-deploys within ~60 seconds
 - **Proxy** — SSH to `pi@piproxy.local`, edit `/home/pi/proxy/server.js`, `pm2 restart proxy`
-- **ESP32** — `./build.sh` (compiles with `arduino-cli` and uploads)
+- **ESP32** — `./build.sh` (compiles with `arduino-cli` and uploads). Preview layout changes by opening `tft-preview.html` in a browser before flashing.

@@ -23,6 +23,7 @@ Custom domain: https://overheadtracker.com
 ```
 index.html                  # Entire web app (single file, ~120 KB)
 build.sh                    # ESP32 compile + upload helper (arduino-cli)
+tft-preview.html            # TFT display simulator (preview firmware UI in browser)
 PI_PROXY_SETUP.md           # Raspberry Pi proxy setup guide
 SPEC.md                     # Product specification and feature matrix
 README.md                   # User-facing documentation
@@ -33,7 +34,7 @@ pi-proxy/                   # Raspberry Pi proxy source
   dashboard.html            # Legacy dashboard UI (used by older server)
   package.json              # Node deps (express, node-fetch)
 tracker_live_fnk0103s/      # ESP32 hardware project
-  tracker_live_fnk0103s.ino # Arduino firmware (~67 KB)
+  tracker_live_fnk0103s.ino # Arduino firmware (~70 KB)
   enclosure/                # 3D-printable case files (STL/STEP)
 .claude/agents/             # Specialist sub-agents
   backend-specialist.md
@@ -68,7 +69,8 @@ The Pi proxy at `api.overheadtracker.com` caches airplanes.live responses for 10
 
 - **Geofence**: User-configurable radius (2–20 km) around a chosen location. Only aircraft inside the fence are shown.
 - **Altitude floor**: Filters out aircraft below a configurable altitude (200–5 000 ft AGL).
-- **Flight phase detection**: LANDING / TAKING OFF / APPROACH / DESCENDING / CLIMBING / OVERHEAD — derived from speed, altitude, and vertical rate.
+- **Flight phase detection**: LANDING / TAKING OFF / APPROACH / DESCENDING / CLIMBING / CRUISING / OVERHEAD / UNKNOWN — derived from speed, altitude, and vertical rate.
+- **TFT preview**: `tft-preview.html` mirrors the ESP32 display rendering in the browser. Same pixel coordinates, colors, and lookup tables. Use it to verify layout changes before flashing.
 - **No build step**: `index.html` is deployed as-is; never introduce a bundler or external dependency that requires a build pipeline.
 - **No framework**: The web app uses vanilla JS and the browser's built-in APIs only. Do not add React, Vue, or similar.
 
@@ -89,9 +91,10 @@ The Pi proxy at `api.overheadtracker.com` caches airplanes.live responses for 10
 
 ### ESP32 firmware change
 1. Edit `tracker_live_fnk0103s/tracker_live_fnk0103s.ino`.
-2. First flash (or if OTA is unavailable): run `./build.sh` to compile and upload via USB (requires Arduino IDE + `arduino-cli` on Windows).
-3. Subsequent flashes: compile with `./build.sh compile`, then upload via Arduino IDE using the `overhead-tracker` network port (OTA over WiFi).
-4. Serial monitor: `./build.sh monitor`.
+2. Preview layout changes by opening `tft-preview.html` in a browser — it mirrors the firmware's rendering logic with interactive controls.
+3. First flash (or if OTA is unavailable): run `./build.sh` to compile and upload via USB (requires Arduino IDE + `arduino-cli` on Windows).
+4. Subsequent flashes: compile with `./build.sh compile`, then upload via Arduino IDE using the `overhead-tracker` network port (OTA over WiFi).
+5. Serial monitor: `./build.sh monitor`.
 
 ---
 

@@ -6,9 +6,18 @@ const { execSync } = require('child_process');
 
 const app      = express();
 const PORT     = 3000;
-const CACHE_MS = 10000;
+const CACHE_MS         = 10000;
+const ROUTE_CACHE_MS   = 30 * 60 * 1000;
+const ROUTE_CACHE_FILE = __dirname + '/route-cache.json';
 
 const cache      = new Map();
+const routeCache = new Map();  // callsign -> { dep, arr, timestamp }
+
+try {
+  const saved = JSON.parse(fs.readFileSync(ROUTE_CACHE_FILE, 'utf8'));
+  for (const [cs, entry] of Object.entries(saved)) routeCache.set(cs, entry);
+  console.log(`Loaded ${routeCache.size} routes from disk cache`);
+} catch { /* file absent on first run */ }
 let   proxyEnabled = true; // ← soft on/off toggle
 
 const startTime = Date.now();
@@ -25,6 +34,35 @@ const requestLog = [];
 function addLog(entry) {
   requestLog.unshift({ ...entry, time: new Date().toISOString() });
   if (requestLog.length > 100) requestLog.pop();
+}
+
+function saveRouteCache() {
+  const obj = {};
+  for (const [cs, entry] of routeCache) obj[cs] = entry;
+  fs.writeFile(ROUTE_CACHE_FILE, JSON.stringify(obj, null, 2), () => {});
+}
+
+async function lookupRoute(callsign) {
+  const cs  = callsign.trim();
+  const hit = routeCache.get(cs);
+  if (hit && (Date.now() - hit.timestamp) < ROUTE_CACHE_MS) return hit;
+
+  try {
+    const url = `https://opensky-network.org/api/routes?callsign=${encodeURIComponent(cs)}`;
+    const r   = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    if (r.ok) {
+      const d = await r.json();
+      if (Array.isArray(d.route) && d.route.length >= 2) {
+        const entry = { dep: d.route[0], arr: d.route[d.route.length - 1], timestamp: Date.now() };
+        routeCache.set(cs, entry);
+        saveRouteCache();
+        return entry;
+      }
+    }
+  } catch { /* timeout or network error */ }
+
+  if (hit) return hit;  // stale disk entry as fallback
+  return null;
 }
 
 function cpuTemp() {
@@ -310,6 +348,14 @@ app.get('/flights', async (req, res) => {
     const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error(`API returned ${response.status}`);
     const data = await response.json();
+    const unrouted = (data.ac || []).filter(ac => ac.flight?.trim() && !ac.dep && !ac.arr);
+    if (unrouted.length > 0) {
+      const routes = await Promise.all(unrouted.map(ac => lookupRoute(ac.flight.trim())));
+      unrouted.forEach((ac, i) => {
+        if (routes[i]?.dep) ac.dep = routes[i].dep;
+        if (routes[i]?.arr) ac.arr = routes[i].arr;
+      });
+    }
     cache.set(key, { data, timestamp: now });
     addLog({ type: 'MISS', client, key });
     res.json(data);

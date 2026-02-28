@@ -50,9 +50,10 @@ const int CYCLE_SECS   = 8;
 
 // ─── Layout ───────────────────────────────────────────
 #define HDR_H      28   // amber header bar
+#define NAV_H      36   // navigation/controls bar below header
 #define FOOT_H     20   // dim footer bar
-#define CONTENT_Y  (HDR_H)
-#define CONTENT_H  (H - HDR_H - FOOT_H)   // 272px
+#define CONTENT_Y  (HDR_H + NAV_H)                // 64
+#define CONTENT_H  (H - HDR_H - NAV_H - FOOT_H)  // 236px
 
 // ─── Colours (RGB565) ─────────────────────────────────
 #define C_BG      0x0820
@@ -63,6 +64,8 @@ const int CYCLE_SECS   = 8;
 #define C_RED     0xF800
 #define C_CYAN    0x07FF
 #define C_YELLOW  0xFFE0
+#define C_ORANGE  0xFC60   // descending (aligned with web app #ff8844)
+#define C_GOLD    0xFE68   // approach   (aligned with web app #ffaa00)
 
 // ─── Location (defaults — overridden by NVS / config.txt) ────────────────
 float HOME_LAT    = 0.0f;
@@ -85,14 +88,15 @@ int         geoIndex      = 1;  // default: 10km
 uint16_t touchCalData[5] = {0};
 bool     touchReady      = false;
 uint32_t lastTouchMs     = 0;
-#define  TOUCH_DEBOUNCE_MS  700
-// Header button zones (right-side pills, left-to-right: WX · GEO · CFG)
-#define  WX_BTN_X1   378
-#define  WX_BTN_X2   414
-#define  GEO_BTN_X1  414
-#define  GEO_BTN_X2  452
-#define  CFG_BTN_X1  454
-#define  CFG_BTN_X2  480
+#define  TOUCH_DEBOUNCE_MS  350
+// Nav bar button zones (below header, right-aligned, 70px wide each)
+#define  NAV_Y       HDR_H
+#define  NAV_BTN_W   70
+#define  NAV_BTN_H   (NAV_H - 4)   // 32px tall (2px top/bottom padding)
+#define  NAV_BTN_GAP 4
+#define  CFG_BTN_X1  (W - NAV_BTN_W)                          // 410
+#define  GEO_BTN_X1  (CFG_BTN_X1 - NAV_BTN_GAP - NAV_BTN_W)  // 336
+#define  WX_BTN_X1   (GEO_BTN_X1 - NAV_BTN_GAP - NAV_BTN_W)  // 262
 
 // ─── Screen mode ──────────────────────────────────────
 enum ScreenMode { SCREEN_FLIGHT, SCREEN_WEATHER };
@@ -159,6 +163,14 @@ int           dataSource   = 0;
 unsigned long lastTick     = 0;
 unsigned long lastCycle    = 0;
 time_t        cacheTimestamp = 0;  // Unix time when cache.json was last written
+
+// ─── Direct API robustness ──────────────────────────────
+int           directApiFailCount   = 0;
+unsigned long directApiNextRetryMs = 0;
+#define       DIRECT_API_MIN_HEAP  40000  // 40 KB minimum free heap for TLS
+#define       DIRECT_API_TIMEOUT   8000   // reduced from 12 s (WDT is 30 s)
+
+bool wifiOk() { return WiFi.status() == WL_CONNECTED; }
 
 // ─── Session log (track unique callsigns to avoid duplicates) ─
 #define MAX_LOGGED 200
@@ -326,7 +338,7 @@ const char* statusLabel(FlightStatus s) {
     case STATUS_CLIMBING:    return "CLIMBING";
     case STATUS_CRUISING:    return "CRUISING";
     case STATUS_DESCENDING:  return "DESCENDING";
-    case STATUS_APPROACH:    return "ON APPROACH";
+    case STATUS_APPROACH:    return "APPROACH";
     case STATUS_LANDING:     return "LANDING";
     case STATUS_OVERHEAD:    return "OVERHEAD";
     default:                 return "UNKNOWN";
@@ -338,8 +350,8 @@ uint16_t statusColor(FlightStatus s) {
     case STATUS_TAKING_OFF:  return C_GREEN;
     case STATUS_CLIMBING:    return C_GREEN;
     case STATUS_CRUISING:    return C_AMBER;
-    case STATUS_DESCENDING:  return C_CYAN;
-    case STATUS_APPROACH:    return C_YELLOW;
+    case STATUS_DESCENDING:  return C_ORANGE;
+    case STATUS_APPROACH:    return C_GOLD;
     case STATUS_LANDING:     return C_RED;
     case STATUS_OVERHEAD:    return C_AMBER;
     default:                 return C_DIM;
@@ -648,7 +660,7 @@ void handleSetupRoot() {
     "<h2>OVERHEAD TRACKER &mdash; SETUP</h2>"
     "<form method='POST' action='/save'>"
     "<b>WI-FI NETWORK</b>"
-    "<input name='ssid' placeholder='Network name' value='%s'>"
+    "<input name='ssid' placeholder='Network name' value='%s' required>"
     "<b>WI-FI PASSWORD</b>"
     "<input name='pass' type='password' placeholder='Password'>"
     "<b>LOCATION</b>"
@@ -734,52 +746,59 @@ void startCaptivePortal() {
 
 // ─── Drawing ──────────────────────────────────────────
 
-// ── Header bar ─────────────────────────────────────────
-void drawHeader(bool fetching = false) {
+// ── Header bar (title + location only — buttons moved to nav bar) ──
+void drawHeader() {
   tft.fillRect(0, 0, W, HDR_H, C_AMBER);
   tft.setTextColor(C_BG, C_AMBER);
   tft.setTextSize(2);
   tft.setCursor(8, 6);
   tft.print("OVERHEAD TRACKER");
-
-  // ── Location label (static, configured via captive portal) ──
-  int locW    = strlen(LOCATION_NAME) * 6;
-  int locLabelX = 215 + (160 - locW) / 2;
-  tft.setTextColor(C_BG, C_AMBER);
-  tft.setTextSize(1);
-  tft.setCursor(locLabelX, 10);
+  int locW = strlen(LOCATION_NAME) * 12;
+  tft.setCursor(W - locW - 8, 6);
   tft.print(LOCATION_NAME);
+}
 
-  // ── WX pill (weather screen toggle) ──
-  uint16_t wxBg  = (currentScreen == SCREEN_WEATHER) ? C_CYAN : C_DIMMER;
-  uint16_t wxFg  = (currentScreen == SCREEN_WEATHER) ? C_BG   : C_AMBER;
-  tft.fillRect(WX_BTN_X1, 4, WX_BTN_X2 - WX_BTN_X1, 20, wxBg);
+// ── Navigation bar (WX · GEO · CFG buttons, flight index indicator) ──
+void drawNavBar() {
+  tft.fillRect(0, NAV_Y, W, NAV_H, C_BG);
+  tft.drawFastHLine(0, NAV_Y, W, C_DIMMER);
+
+  // Flight index indicator (left side)
+  if (currentScreen == SCREEN_FLIGHT && flightCount > 1) {
+    char navBuf[16];
+    snprintf(navBuf, sizeof(navBuf), "< %d/%d >", flightIndex + 1, flightCount);
+    tft.setTextSize(2);
+    tft.setTextColor(C_DIM, C_BG);
+    tft.setCursor(8, NAV_Y + 10);
+    tft.print(navBuf);
+  }
+
+  // WX button
+  uint16_t wxBg = (currentScreen == SCREEN_WEATHER) ? C_CYAN : C_DIMMER;
+  uint16_t wxFg = (currentScreen == SCREEN_WEATHER) ? C_BG   : C_AMBER;
+  tft.fillRect(WX_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, wxBg);
   tft.setTextColor(wxFg, wxBg);
-  tft.setTextSize(1);
-  tft.setCursor((WX_BTN_X1 + WX_BTN_X2) / 2 - 6, 10);
+  tft.setTextSize(2);
+  tft.setCursor(WX_BTN_X1 + (NAV_BTN_W - 24) / 2, NAV_Y + 10);
   tft.print("WX");
 
-  // ── Geofence preset pill ──
+  // GEO button
   const char* geoLabels[] = {"5km", "10km", "50km"};
-  const char* geoLabel = geoLabels[geoIndex];
-  int geoLabelW = strlen(geoLabel) * 6 + 8;
-  int geoPillX  = (GEO_BTN_X1 + GEO_BTN_X2) / 2 - geoLabelW / 2;
-  tft.fillRect(GEO_BTN_X1, 4, GEO_BTN_X2 - GEO_BTN_X1, 20, C_DIMMER);
+  tft.fillRect(GEO_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, C_DIMMER);
   tft.setTextColor(C_AMBER, C_DIMMER);
-  tft.setTextSize(1);
-  tft.setCursor(geoPillX, 10);
-  tft.print(geoLabel);
+  tft.setTextSize(2);
+  int geoW = strlen(geoLabels[geoIndex]) * 12;
+  tft.setCursor(GEO_BTN_X1 + (NAV_BTN_W - geoW) / 2, NAV_Y + 10);
+  tft.print(geoLabels[geoIndex]);
 
-  // ── CFG pill (far right, tappable — opens captive portal) ──
-  // Source is already shown in the footer status bar.
-  uint16_t cfgBg     = fetching ? C_RED : C_DIMMER;
-  const char* cfgLbl = fetching ? "..." : "CFG";
-  int cfgLblW = strlen(cfgLbl) * 6 + 8;
-  int cfgPillX = (CFG_BTN_X1 + CFG_BTN_X2) / 2 - cfgLblW / 2;
-  tft.fillRect(CFG_BTN_X1, 4, CFG_BTN_X2 - CFG_BTN_X1, 20, cfgBg);
+  // CFG button
+  uint16_t cfgBg = isFetching ? C_RED : C_DIMMER;
+  const char* cfgLbl = isFetching ? "..." : "CFG";
+  tft.fillRect(CFG_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, cfgBg);
   tft.setTextColor(C_AMBER, cfgBg);
-  tft.setTextSize(1);
-  tft.setCursor(cfgPillX, 10);
+  tft.setTextSize(2);
+  int cfgW = strlen(cfgLbl) * 12;
+  tft.setCursor(CFG_BTN_X1 + (NAV_BTN_W - cfgW) / 2, NAV_Y + 10);
   tft.print(cfgLbl);
 }
 
@@ -820,71 +839,149 @@ void handleTouch(uint16_t tx, uint16_t ty) {
   if (now - lastTouchMs < TOUCH_DEBOUNCE_MS) return;
   lastTouchMs = now;
 
-  // WX tap — toggle weather screen
-  if (tx >= WX_BTN_X1 && tx <= WX_BTN_X2 && ty < HDR_H) {
-    if (currentScreen == SCREEN_WEATHER) {
-      currentScreen = SCREEN_FLIGHT;
-      if (flightCount > 0) renderFlight(flights[flightIndex]);
-      else renderMessage("NO AIRCRAFT", "IN RANGE");
-    } else {
-      currentScreen = SCREEN_WEATHER;
-      renderWeather();
+  // ── Nav bar buttons ──
+  if (ty >= NAV_Y && ty < NAV_Y + NAV_H) {
+
+    // WX button
+    if (tx >= WX_BTN_X1 && tx < WX_BTN_X1 + NAV_BTN_W) {
+      tft.fillRect(WX_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, C_AMBER);
+      tft.setTextColor(C_BG, C_AMBER);
+      tft.setTextSize(2);
+      tft.setCursor(WX_BTN_X1 + (NAV_BTN_W - 24) / 2, NAV_Y + 10);
+      tft.print("WX");
+      delay(100);
+      if (currentScreen == SCREEN_WEATHER) {
+        currentScreen = SCREEN_FLIGHT;
+        if (flightCount > 0) renderFlight(flights[flightIndex]);
+        else renderMessage("NO AIRCRAFT", "IN RANGE");
+      } else {
+        currentScreen = SCREEN_WEATHER;
+        renderWeather();
+      }
+      return;
+    }
+
+    // GEO button
+    if (tx >= GEO_BTN_X1 && tx < GEO_BTN_X1 + NAV_BTN_W) {
+      tft.fillRect(GEO_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, C_AMBER);
+      tft.setTextColor(C_BG, C_AMBER);
+      tft.setTextSize(2);
+      tft.setCursor(GEO_BTN_X1 + 8, NAV_Y + 10);
+      tft.print(geoIndex == 0 ? "5km" : geoIndex == 1 ? "10km" : "50km");
+      delay(100);
+      geoIndex = (geoIndex + 1) % GEO_COUNT;
+      GEOFENCE_KM = GEO_PRESETS[geoIndex];
+      saveGeoIndex();
+      Serial.printf("Geofence: %.0f km\n", GEOFENCE_KM);
+      drawNavBar();
+      if (!isFetching) {
+        flightCount = 0;
+        flightIndex = 0;
+        fetchFlights();
+        countdown = REFRESH_SECS;
+        lastCycle  = millis();
+      }
+      return;
+    }
+
+    // CFG button (two-tap confirmation — reboot is destructive)
+    if (tx >= CFG_BTN_X1 && tx < CFG_BTN_X1 + NAV_BTN_W) {
+      if (isFetching) return;
+      tft.fillRect(CFG_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, C_RED);
+      tft.setTextColor(C_BG, C_RED);
+      tft.setTextSize(1);
+      tft.setCursor(CFG_BTN_X1 + 5, NAV_Y + 6);
+      tft.print("REBOOT?");
+      tft.setCursor(CFG_BTN_X1 + 2, NAV_Y + 20);
+      tft.print("TAP AGAIN");
+      uint32_t confirmDeadline = millis() + 3000;
+      bool confirmed = false;
+      while (millis() < confirmDeadline) {
+        uint16_t cx, cy;
+        if (tft.getTouch(&cx, &cy)) {
+          if (cx >= CFG_BTN_X1 && cy >= NAV_Y && cy < NAV_Y + NAV_H) {
+            confirmed = true;
+            break;
+          } else {
+            break;
+          }
+        }
+        delay(30);
+      }
+      if (confirmed) {
+        startCaptivePortal();
+      } else {
+        drawNavBar();
+      }
+      return;
     }
     return;
   }
 
-  // Geofence preset cycle — tap the geo pill in the header
-  if (tx >= GEO_BTN_X1 && tx <= GEO_BTN_X2 && ty < HDR_H) {
-    geoIndex = (geoIndex + 1) % GEO_COUNT;
-    GEOFENCE_KM = GEO_PRESETS[geoIndex];
-    saveGeoIndex();
-    Serial.printf("Geofence: %.0f km\n", GEOFENCE_KM);
-    drawHeader(isFetching);
-    if (!isFetching) {
-      flightCount = 0;
-      flightIndex = 0;
-      fetchFlights();
-      countdown = REFRESH_SECS;
-      lastCycle  = millis();
+  // ── Content area: tap left/right to cycle flights ──
+  if (ty >= CONTENT_Y && ty < (H - FOOT_H) &&
+      currentScreen == SCREEN_FLIGHT && flightCount > 1) {
+    if (tx < W / 2) {
+      flightIndex = (flightIndex - 1 + flightCount) % flightCount;
+    } else {
+      flightIndex = (flightIndex + 1) % flightCount;
     }
-  }
-
-  // CFG tap — open captive portal to change WiFi/location
-  if (tx >= CFG_BTN_X1 && tx <= CFG_BTN_X2 && ty < HDR_H) {
-    if (!isFetching) {
-      startCaptivePortal();  // switches to AP mode and blocks until form saved + reboot
-    }
+    lastCycle = millis();
+    renderFlight(flights[flightIndex]);
+    return;
   }
 }
 
 // ─── Main Content Display (Redesigned) ─────────────────
 void renderFlight(const Flight& f) {
-  drawHeader(isFetching);
-  
-  // Clear the main content area once to prevent flickering
+  drawHeader();
+  drawNavBar();
+
+  // Clear the main content area
   tft.fillRect(0, CONTENT_Y, W, CONTENT_H, C_BG);
-  
+
+  // Emergency squawk banner (full-width red alert at top of content)
+  bool hasEmergency = strcmp(f.squawk,"7700")==0 || strcmp(f.squawk,"7600")==0 || strcmp(f.squawk,"7500")==0;
+  int emergOffset = 0;
+  if (hasEmergency) {
+    const char* emergLabel = strcmp(f.squawk,"7700")==0 ? "EMERGENCY - MAYDAY" :
+                             strcmp(f.squawk,"7600")==0 ? "EMERGENCY - NORDO"  :
+                                                          "EMERGENCY - HIJACK";
+    tft.fillRect(0, CONTENT_Y, W, 24, C_RED);
+    tft.setTextColor(C_BG, C_RED);
+    tft.setTextSize(2);
+    int lblW = strlen(emergLabel) * 12;
+    tft.setCursor((W - lblW) / 2, CONTENT_Y + 4);
+    tft.print(emergLabel);
+    emergOffset = 24;
+  }
+
   int x = 15;
-  int y = CONTENT_Y + 10;
+  int y = CONTENT_Y + emergOffset + 4;
 
   // 1. PRIMARY IDENTITY (Flight & Airline)
-  tft.setTextSize(4);
+  int csSize = hasEmergency ? 3 : 4;
+  tft.setTextSize(csSize);
   tft.setTextColor(C_AMBER, C_BG);
   tft.setCursor(x, y);
   tft.print(f.callsign[0] ? f.callsign : "SEARCHING");
-  
-  y += 32;
-  const char* al = getAirline(f.callsign);
-  tft.setTextSize(2);
-  tft.setTextColor(al[0] ? C_AMBER : C_DIM, C_BG);
-  tft.setCursor(x, y);
-  tft.print(al[0] ? al : "UNKNOWN AIRLINE");
+
+  y += csSize * 8;
+  if (!hasEmergency) {
+    const char* al = getAirline(f.callsign);
+    tft.setTextSize(2);
+    tft.setTextColor(al[0] ? C_AMBER : C_DIM, C_BG);
+    tft.setCursor(x, y);
+    tft.print(al[0] ? al : "UNKNOWN AIRLINE");
+    y += 20;
+  } else {
+    y += 8;
+  }
 
   // 2. AIRCRAFT TYPE & REG
-  y += 30;
   tft.drawFastHLine(10, y, W - 20, C_DIMMER);
-  y += 10;
-  
+  y += 8;
+
   tft.setTextSize(1);
   tft.setTextColor(C_DIM, C_BG);
   tft.setCursor(x, y);
@@ -903,9 +1000,9 @@ void renderFlight(const Flight& f) {
   tft.print(f.reg[0] ? f.reg : "---");
 
   // 3. ROUTE SECTION
-  y += 28;
+  y += 20;
   tft.drawFastHLine(10, y, W - 20, C_DIMMER);
-  y += 10;
+  y += 8;
   
   tft.setTextSize(1);
   tft.setTextColor(C_DIM, C_BG);
@@ -914,72 +1011,109 @@ void renderFlight(const Flight& f) {
   
   y += 10;
   char routeBuf[64];
-  tft.setTextSize(3);
-  tft.setTextColor(C_YELLOW, C_BG);
-  tft.setCursor(x, y);
   if (formatRoute(f.dep, f.arr, routeBuf, sizeof(routeBuf))) {
+    tft.setTextSize(2);
+    tft.setTextColor(C_YELLOW, C_BG);
+    tft.setCursor(x, y);
     tft.print(routeBuf);
   } else {
+    tft.setTextSize(2);
     tft.setTextColor(C_DIMMER, C_BG);
+    tft.setCursor(x, y);
     tft.print("NO ROUTE DATA");
   }
 
-  // 4. PHASE, ALTITUDE & SPEED (Footer Dashboard)
-  int dashY = H - FOOT_H - 85;
+  // 4. DASHBOARD: PHASE | ALT | SPEED | DIST (4 columns at 120px each)
+  int dashY = H - FOOT_H - 75;
   tft.drawFastHLine(0, dashY, W, C_DIM);
-  
-  // Phase Block
+
+  // Phase Block (0-120)
   uint16_t sCol = statusColor(f.status);
-  tft.fillRect(0, dashY + 1, 4, 84, sCol); // Status color accent
-  
+  tft.fillRect(0, dashY + 1, 4, 74, sCol);
   tft.setTextSize(1);
   tft.setTextColor(C_DIM, C_BG);
-  tft.setCursor(12, dashY + 10);
+  tft.setCursor(12, dashY + 8);
   tft.print("PHASE");
-  
   tft.setTextSize(2);
   tft.setTextColor(sCol, C_BG);
-  tft.setCursor(12, dashY + 28);
+  tft.setCursor(12, dashY + 24);
   tft.print(statusLabel(f.status));
-  
-  // Squawk
+
+  // Squawk (below phase)
   bool emerg = strcmp(f.squawk,"7700")==0 || strcmp(f.squawk,"7600")==0 || strcmp(f.squawk,"7500")==0;
   const char* sqLabel = strcmp(f.squawk,"7700")==0 ? "MAYDAY" : strcmp(f.squawk,"7600")==0 ? "NORDO" : strcmp(f.squawk,"7500")==0 ? "HIJACK" : f.squawk;
   tft.setTextColor(emerg ? C_RED : C_DIM, C_BG);
   tft.setTextSize(1);
-  tft.setCursor(12, dashY + 52);
+  tft.setCursor(12, dashY + 44);
   tft.print("SQK ");
   tft.print(sqLabel);
 
-  // Altitude Block
+  // Altitude Block (120-240)
   char altBuf[20];
   formatAlt(f.alt, altBuf, sizeof(altBuf));
-  tft.drawFastVLine(W/3, dashY + 5, 75, C_DIMMER);
+  tft.drawFastVLine(120, dashY + 5, 65, C_DIMMER);
   tft.setTextSize(1);
   tft.setTextColor(C_DIM, C_BG);
-  tft.setCursor(W/3 + 12, dashY + 10);
+  tft.setCursor(132, dashY + 8);
   tft.print("ALTITUDE");
-  tft.setTextSize(3);
+  tft.setTextSize(2);
   tft.setTextColor(C_AMBER, C_BG);
-  tft.setCursor(W/3 + 12, dashY + 30);
+  tft.setCursor(132, dashY + 24);
   tft.print(altBuf);
+  // Vertical rate indicator
+  tft.setTextSize(1);
+  if (abs(f.vs) >= 50) {
+    char vsBuf[16];
+    if (f.vs > 0) {
+      snprintf(vsBuf, sizeof(vsBuf), "+%d FPM", f.vs);
+      tft.setTextColor(C_GREEN, C_BG);
+    } else {
+      snprintf(vsBuf, sizeof(vsBuf), "%d FPM", f.vs);
+      tft.setTextColor(C_RED, C_BG);
+    }
+    tft.setCursor(132, dashY + 44);
+    tft.print(vsBuf);
+  } else {
+    tft.setTextColor(C_AMBER, C_BG);
+    tft.setCursor(132, dashY + 44);
+    tft.print("LEVEL");
+  }
 
-  // Speed Block
-  tft.drawFastVLine((W/3)*2, dashY + 5, 75, C_DIMMER);
+  // Speed Block (240-360)
+  tft.drawFastVLine(240, dashY + 5, 65, C_DIMMER);
   tft.setTextSize(1);
   tft.setTextColor(C_DIM, C_BG);
-  tft.setCursor((W/3)*2 + 12, dashY + 10);
+  tft.setCursor(252, dashY + 8);
   tft.print("SPEED");
-  tft.setTextSize(3);
+  tft.setTextSize(2);
   tft.setTextColor(C_AMBER, C_BG);
-  tft.setCursor((W/3)*2 + 12, dashY + 30);
-  
+  tft.setCursor(252, dashY + 24);
   if (f.speed > 0) {
     char spdBuf[16];
     snprintf(spdBuf, sizeof(spdBuf), "%d", f.speed);
     tft.print(spdBuf);
     tft.setTextSize(1);
     tft.print(" KT");
+  } else {
+    tft.print("---");
+  }
+
+  // Distance Block (360-480)
+  tft.drawFastVLine(360, dashY + 5, 65, C_DIMMER);
+  tft.setTextSize(1);
+  tft.setTextColor(C_DIM, C_BG);
+  tft.setCursor(372, dashY + 8);
+  tft.print("DISTANCE");
+  tft.setTextSize(2);
+  tft.setTextColor(C_AMBER, C_BG);
+  tft.setCursor(372, dashY + 24);
+  if (f.dist > 0) {
+    char distBuf[16];
+    if (f.dist >= 10.0f) snprintf(distBuf, sizeof(distBuf), "%.0f", f.dist);
+    else                  snprintf(distBuf, sizeof(distBuf), "%.1f", f.dist);
+    tft.print(distBuf);
+    tft.setTextSize(1);
+    tft.print(" KM");
   } else {
     tft.print("---");
   }
@@ -991,6 +1125,7 @@ void renderFlight(const Flight& f) {
 // ─── Fetch weather from Pi proxy (Open-Meteo) ─────────
 void fetchWeather() {
   esp_task_wdt_reset();
+  if (!wifiOk()) { Serial.println("[WX] WiFi not connected"); return; }
   char url[160];
   snprintf(url, sizeof(url),
     "http://%s:%d/weather?lat=%.4f&lon=%.4f",
@@ -1028,7 +1163,8 @@ void fetchWeather() {
 
 // ─── Weather + clock screen ────────────────────────────
 void renderWeather() {
-  drawHeader(false);
+  drawHeader();
+  drawNavBar();
   tft.fillRect(0, CONTENT_Y, W, CONTENT_H, C_BG);
 
   // ── Clock ──
@@ -1114,11 +1250,11 @@ void renderWeather() {
   tft.setCursor(W/2 + 15, cy); tft.print("WIND");
   cy += 10;
   tft.setTextSize(2);
-  tft.setTextColor(C_CYAN, C_BG);
+  tft.setTextColor(C_AMBER, C_BG);
   snprintf(buf, sizeof(buf), "%d%%", wxData.humidity);
   tft.setCursor(15, cy); tft.print(buf);
   tft.setTextColor(C_AMBER, C_BG);
-  snprintf(buf, sizeof(buf), "%.0f KM  %s", wxData.wind_speed, wxData.wind_cardinal);
+  snprintf(buf, sizeof(buf), "%.0f KM/H %s", wxData.wind_speed, wxData.wind_cardinal);
   tft.setCursor(W/2 + 15, cy); tft.print(buf);
   cy += 20;
 
@@ -1155,7 +1291,7 @@ void bootLine(const char* label, const char* result, uint16_t col, int pauseMs) 
   tft.setCursor(214, bootLineY);
   tft.print(result);
   bootLineY += 14;
-  delay(35);
+  delay(10);
 }
 
 void bootSequence() {
@@ -1163,11 +1299,11 @@ void bootSequence() {
   bootLineY = 56;
   for (int y = 0; y < H; y += 2) {
     tft.drawFastHLine(0, y, W, C_DIMMER);
-    delayMicroseconds(500);
+    delayMicroseconds(200);
   }
-  delay(80);
+  delay(30);
   tft.fillScreen(C_BG);
-  delay(50);
+  delay(20);
 
   tft.setTextColor(C_AMBER, C_BG);
   tft.setTextSize(2);
@@ -1178,60 +1314,59 @@ void bootSequence() {
   tft.setCursor(10, 34);
   tft.print("ADS-B AIRSPACE SURVEILLANCE  REV 3.2");
   tft.drawFastHLine(0, 47, W, C_DIM);
-  delay(250);
+  delay(100);
   char buf[40];
   snprintf(buf, sizeof(buf), "240 MHz  DUAL CORE");
-  bootLine("CPU",            buf,                    C_GREEN,  90);
+  bootLine("CPU",            buf,                    C_GREEN,  30);
   snprintf(buf, sizeof(buf), "%d KB FREE", ESP.getFreeHeap() / 1024);
-  bootLine("HEAP MEMORY",    buf,                    C_GREEN,  110);
+  bootLine("HEAP MEMORY",    buf,                    C_GREEN,  35);
   snprintf(buf, sizeof(buf), "%d KB",      ESP.getFlashChipSize() / 1024);
-  bootLine("FLASH SIZE",     buf,                    C_AMBER,  80);
+  bootLine("FLASH SIZE",     buf,                    C_AMBER,  25);
   snprintf(buf, sizeof(buf), "%s", ESP.getSdkVersion());
-  bootLine("ESP-IDF SDK",    buf,                    C_DIM,    70);
-  bootLine("SPI BUS",        "CLK 40MHz  OK",         C_GREEN,  80);
-  bootLine("DISPLAY",        "ST7796 480x320 16BIT",  C_GREEN,  90);
+  bootLine("ESP-IDF SDK",    buf,                    C_DIM,    20);
+  bootLine("SPI BUS",        "CLK 40MHz  OK",         C_GREEN,  25);
+  bootLine("DISPLAY",        "ST7796 480x320 16BIT",  C_GREEN,  30);
   uint8_t mac[6];
   WiFi.macAddress(mac);
   snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
            mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-  bootLine("WIFI MAC",       buf,                    C_AMBER,  100);
-  bootLine("WIFI MODE",      "STA  802.11 B/G/N",    C_AMBER,  70);
-  bootLine("SD CARD",        "SEARCHING...",         C_YELLOW, 280);
+  bootLine("WIFI MAC",       buf,                    C_AMBER,  30);
+  bootLine("WIFI MODE",      "STA  802.11 B/G/N",    C_AMBER,  20);
+  bootLine("SD CARD",        "SEARCHING...",         C_YELLOW, 80);
   snprintf(buf, sizeof(buf), "%s:%d", PROXY_HOST, PROXY_PORT);
-  bootLine("PROXY TARGET",   buf,                    C_AMBER,  80);
+  bootLine("PROXY TARGET",   buf,                    C_AMBER,  25);
   snprintf(buf, sizeof(buf), "%.4f, %.4f", HOME_LAT, HOME_LON);
-  bootLine("HOME COORDS",    buf,                    C_AMBER,  90);
+  bootLine("HOME COORDS",    buf,                    C_AMBER,  25);
   snprintf(buf, sizeof(buf), "%.0f KM RADIUS", GEOFENCE_KM);
-  bootLine("GEOFENCE",       buf,                    C_AMBER,  70);
-  bootLine("ADS-B PIPELINE", "DECODER READY",        C_GREEN,  120);
+  bootLine("GEOFENCE",       buf,                    C_AMBER,  20);
+  bootLine("ADS-B PIPELINE", "DECODER READY",        C_GREEN,  35);
   snprintf(buf, sizeof(buf), "%d SEC AUTO-REFRESH", REFRESH_SECS);
-  bootLine("POLL INTERVAL",  buf,                    C_GREEN,  80);
+  bootLine("POLL INTERVAL",  buf,                    C_GREEN,  25);
   tft.drawFastHLine(0, bootLineY + 4, W, C_DIM);
   int flashY = bootLineY + 8;
 
-  for (int i = 0; i < 3; i++) {
-    tft.fillRect(8, flashY, W - 16, 24, C_GREEN);
-    tft.setTextColor(C_BG, C_GREEN);
-    tft.setTextSize(2);
-    int textX = (W - 13*12) / 2;
-    tft.setCursor(textX, flashY + 4);
-    tft.print("SYSTEM ONLINE");
-    delay(170);
-    tft.fillRect(8, flashY, W - 16, 24, C_BG);
-    delay(110);
-  }
   tft.fillRect(8, flashY, W - 16, 24, C_GREEN);
   tft.setTextColor(C_BG, C_GREEN);
   tft.setTextSize(2);
-  tft.setCursor((W - 13*12) / 2, flashY + 4);
+  int textX = (W - 13*12) / 2;
+  tft.setCursor(textX, flashY + 4);
   tft.print("SYSTEM ONLINE");
-  delay(800);
+  delay(120);
+  tft.fillRect(8, flashY, W - 16, 24, C_BG);
+  delay(80);
+  tft.fillRect(8, flashY, W - 16, 24, C_GREEN);
+  tft.setTextColor(C_BG, C_GREEN);
+  tft.setTextSize(2);
+  tft.setCursor(textX, flashY + 4);
+  tft.print("SYSTEM ONLINE");
+  delay(400);
 }
 
 // ── Error / status message screen ──────────────────────
 void renderMessage(const char* line1, const char* line2 = nullptr) {
   tft.fillScreen(C_BG);
-  drawHeader(false);
+  drawHeader();
+  drawNavBar();
   tft.setTextColor(C_AMBER, C_BG);
   tft.setTextSize(2);
   tft.setCursor(16, H/2 - 16);
@@ -1247,7 +1382,7 @@ void renderMessage(const char* line1, const char* line2 = nullptr) {
 // ─── Parse a String payload (proxy or cache) ──────────
 int extractFlights(DynamicJsonDocument& doc);
 int parsePayload(String& payload) {
-  StaticJsonDocument<300> filter;
+  StaticJsonDocument<512> filter;
   JsonObject af = filter["ac"].createNestedObject();
   af["flight"] = af["r"] = af["t"] = af["lat"] = af["lon"] =
   af["alt_baro"] = af["gs"] = af["baro_rate"] = af["track"] =
@@ -1271,6 +1406,7 @@ int parsePayload(String& payload) {
 
 // ─── Fetch: proxy (returns small String) ──────────────
 String fetchFromProxy() {
+  if (!wifiOk()) { Serial.println("[PROXY] WiFi not connected"); return ""; }
   char url[160];
   snprintf(url, sizeof(url),
     "http://%s:%d/flights?lat=%.4f&lon=%.4f&radius=%d",
@@ -1351,6 +1487,22 @@ static int readNumber(WiFiClient* s, char* buf, int maxLen) {
 }
 
 int fetchAndParseDirectAPI() {
+  if (!wifiOk()) {
+    Serial.println("[DIRECT] WiFi not connected, skipping");
+    return -1;
+  }
+  int freeHeap = ESP.getFreeHeap();
+  Serial.printf("[DIRECT] Free heap: %d\n", freeHeap);
+  if (freeHeap < DIRECT_API_MIN_HEAP) {
+    Serial.println("[DIRECT] Insufficient heap for TLS, skipping");
+    return -1;
+  }
+  if (directApiFailCount > 0 && millis() < directApiNextRetryMs) {
+    Serial.printf("[DIRECT] Backoff active, %lu ms remaining\n",
+                  directApiNextRetryMs - millis());
+    return -1;
+  }
+
   char url[160];
   snprintf(url, sizeof(url),
     "https://api.airplanes.live/v2/point/%.4f/%.4f/%d",
@@ -1358,15 +1510,21 @@ int fetchAndParseDirectAPI() {
 
   WiFiClientSecure tlsClient;
   tlsClient.setCACert(AIRPLANES_LIVE_CA);
+  tlsClient.setTimeout(DIRECT_API_TIMEOUT / 1000);
   HTTPClient http;
   http.begin(tlsClient, url);
-  http.setTimeout(12000);
+  http.setTimeout(DIRECT_API_TIMEOUT);
   int code = http.GET();
   if (code != 200) {
     http.end();
     Serial.printf("Direct API failed (%d)\n", code);
+    directApiFailCount++;
+    unsigned long backoffMs = min(120000UL, 15000UL * (1UL << min(directApiFailCount - 1, 3)));
+    directApiNextRetryMs = millis() + backoffMs;
+    Serial.printf("[DIRECT] Backoff set to %lu ms (fail #%d)\n", backoffMs, directApiFailCount);
     return -1;
   }
+  directApiFailCount = 0;
 
   Serial.printf("[MEM] Direct stream scan start: %d free\n", ESP.getFreeHeap());
 
@@ -1424,9 +1582,10 @@ int fetchAndParseDirectAPI() {
     key[0] = 0; val[0] = 0;
   };
 
-  unsigned long deadline = millis() + 12000;
+  unsigned long deadline = millis() + DIRECT_API_TIMEOUT;
   int c;
   while (millis() < deadline) {
+    if (!wifiOk()) { Serial.println("[DIRECT] WiFi lost during stream"); break; }
     if (!s->available()) { delay(5); continue; }
     c = s->read();
     if (c == -1) break;
@@ -1523,39 +1682,46 @@ void fetchFlights() {
   Serial.printf("[MEM] fetchFlights start: %d bytes free\n", ESP.getFreeHeap());
   isFetching = true;
   if (flightCount > 0) {
-    drawHeader(true);
+    drawHeader();
+    drawNavBar();
     drawStatusBar();
   } else {
     renderMessage("FETCHING...");
   }
 
-  int newCount = 0;
+  int newCount = -1;
   bool fromCache = false;
-  String payload = fetchFromProxy();
-  if (!payload.isEmpty()) {
-    writeCache(payload);
-    newCount = parsePayload(payload);
-    payload = String();  
-    dataSource = 0;
-  } else {
-    Serial.println("Trying direct API (stream)...");
-    newCount = fetchAndParseDirectAPI();
-    if (newCount >= 0) dataSource = 1;
 
-    if (newCount < 0) {
-      Serial.println("Direct API failed, loading SD cache...");
-      payload = readCache();
-      if (!payload.isEmpty()) {
-        newCount = parsePayload(payload);
-        payload = String();
-        fromCache = true;
-        dataSource = 2;  
-        Serial.println("Using cached data.");
-      } else {
-        renderMessage("NO DATA", "ALL SOURCES FAILED");
-        isFetching = false;
-        return;
-      }
+  if (wifiOk()) {
+    String payload = fetchFromProxy();
+    if (!payload.isEmpty()) {
+      writeCache(payload);
+      newCount = parsePayload(payload);
+      payload = String();
+      dataSource = 0;
+    } else {
+      Serial.println("Trying direct API (stream)...");
+      esp_task_wdt_reset();
+      newCount = fetchAndParseDirectAPI();
+      if (newCount >= 0) dataSource = 1;
+    }
+  } else {
+    Serial.println("[FETCH] WiFi not connected, skipping network fetches");
+  }
+
+  if (newCount < 0) {
+    Serial.println("Network failed, loading SD cache...");
+    String payload = readCache();
+    if (!payload.isEmpty()) {
+      newCount = parsePayload(payload);
+      payload = String();
+      fromCache = true;
+      dataSource = 2;
+      Serial.println("Using cached data.");
+    } else {
+      renderMessage("NO DATA", "ALL SOURCES FAILED");
+      isFetching = false;
+      return;
     }
   }
 
@@ -1573,6 +1739,20 @@ void fetchFlights() {
 
   for (int i = 0; i < flightCount; i++) logFlight(flights[i]);
   if (flightCount == 0) {
+    // Show transition message before switching to weather
+    tft.fillRect(0, CONTENT_Y, W, CONTENT_H, C_BG);
+    tft.setTextSize(3);
+    tft.setTextColor(C_AMBER, C_BG);
+    int msgW = 11 * 18;
+    tft.setCursor((W - msgW) / 2, CONTENT_Y + CONTENT_H / 2 - 24);
+    tft.print("CLEAR SKIES");
+    tft.setTextSize(1);
+    tft.setTextColor(C_DIM, C_BG);
+    int subW = 20 * 6;
+    tft.setCursor((W - subW) / 2, CONTENT_Y + CONTENT_H / 2 + 8);
+    tft.print("NO AIRCRAFT IN RANGE");
+    drawStatusBar();
+    delay(2500);
     currentScreen = SCREEN_WEATHER;
     renderWeather();
   } else {
@@ -1587,7 +1767,7 @@ void drawOtaProgress(int pct) {
   if (first) {
     first = false;
     tft.fillScreen(C_BG);
-    tft.setTextColor(TFT_WHITE, C_BG);
+    tft.setTextColor(C_AMBER, C_BG);
     tft.setTextSize(3);
     tft.setCursor(100, 110);
     tft.print("OTA UPDATE");
@@ -1597,7 +1777,7 @@ void drawOtaProgress(int pct) {
     tft.print("Do not power off");
   }
   const int BX = 40, BY = 210, BW = 400, BH = 24;
-  tft.drawRect(BX, BY, BW, BH, TFT_WHITE);
+  tft.drawRect(BX, BY, BW, BH, C_AMBER);
   tft.fillRect(BX + 1, BY + 1, (BW - 2) * pct / 100, BH - 2, C_GREEN);
 }
 
