@@ -22,6 +22,7 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ArduinoOTA.h>
+#include <esp_task_wdt.h>
 
 TFT_eSPI   tft = TFT_eSPI();
 WebServer  setupServer(80);
@@ -1749,6 +1750,10 @@ void setup() {
     Serial.println("OTA ready — overhead-tracker.local");
   }
 
+  // Hardware watchdog: reboot if loop() stalls for > 30 s
+  esp_task_wdt_init(30, true);
+  esp_task_wdt_add(NULL);
+
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi failed, attempting cache...");
     String cached = readCache();
@@ -1893,6 +1898,7 @@ void setup() {
 
 // ─── Loop ─────────────────────────────────────────────
 void loop() {
+  esp_task_wdt_reset();
   unsigned long now = millis();
   ArduinoOTA.handle();
 
@@ -1908,6 +1914,10 @@ void loop() {
     lastTick = now;
     countdown--;
     wxCountdown--;
+
+    if (WiFi.status() != WL_CONNECTED) {
+      WiFi.reconnect();
+    }
 
     if (currentScreen == SCREEN_FLIGHT && flightCount > 0) drawStatusBar();
 

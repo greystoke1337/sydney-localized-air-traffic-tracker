@@ -926,6 +926,7 @@
         if (gs  !== null && (entry.gs  === null || gs  > entry.gs )) entry.gs  = gs;
         if (entry.dist === null || distKm < entry.dist) entry.dist = distKm;
       } else {
+        if (sessionLog.size >= 500) sessionLog.delete(sessionLog.keys().next().value);
         sessionLog.set(hex, { call, type, timeStr, phase: phase.label, airline,
           alt, gs, dist: distKm, interesting: flags.length > 0 });
         renderLog();
@@ -1225,9 +1226,14 @@
     // Updates the ROUTE line in #info without re-rendering everything else
     function updateRouteDisplay(routeStr) {
       const info = document.getElementById('info');
-      // Remove any existing route line, then append
-      info.innerHTML = info.innerHTML.replace(/<div class="info-row"><span class="info-label">ROUTE<\/span>.*?<\/div>/s, '');
-      if (routeStr) info.innerHTML += '<div class="info-row"><span class="info-label">ROUTE  </span><span class="info-value info-route">' + routeStr + '</span></div>';
+      const existing = info.querySelector('.info-route');
+      if (existing) existing.closest('.info-row').remove();
+      if (routeStr) {
+        const row = document.createElement('div');
+        row.className = 'info-row';
+        row.innerHTML = '<span class="info-label">ROUTE  </span><span class="info-value info-route">' + routeStr + '</span>';
+        info.appendChild(row);
+      }
     }
 
     // Looks up route by callsign from adsbdb.com, falls back gracefully.
