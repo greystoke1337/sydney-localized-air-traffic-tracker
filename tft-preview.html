@@ -130,10 +130,10 @@
   <div class="ctl-row">
     <label>Phase</label>
     <select id="ctl-phase">
-      <option value="0">TAKING OFF</option>
+      <option value="0">TAKEOFF</option>
       <option value="1">CLIMBING</option>
       <option value="2" selected>CRUISING</option>
-      <option value="3">DESCENDING</option>
+      <option value="3">DESCEND</option>
       <option value="4">APPROACH</option>
       <option value="5">LANDING</option>
       <option value="6">OVERHEAD</option>
@@ -339,7 +339,7 @@ function formatAlt(alt) {
   return alt + ' FT';
 }
 
-const STATUS_LABELS = ['TAKING OFF','CLIMBING','CRUISING','DESCENDING','APPROACH','LANDING','OVERHEAD','UNKNOWN'];
+const STATUS_LABELS = ['TAKEOFF','CLIMBING','CRUISING','DESCEND','APPROACH','LANDING','OVERHEAD','UNKNOWN'];
 const STATUS_COLORS = [C_GREEN, C_GREEN, C_AMBER, C_ORANGE, C_GOLD, C_RED, C_CYAN, C_DIM];
 
 function statusLabel(s) { return STATUS_LABELS[s] || 'UNKNOWN'; }

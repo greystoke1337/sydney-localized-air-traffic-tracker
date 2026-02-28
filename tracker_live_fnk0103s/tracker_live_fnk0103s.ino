@@ -80,7 +80,7 @@ bool  needsGeocode      = false;
 bool sdAvailable = false;
 
 // ─── Geofence presets ─────────────────────────────────
-const float GEO_PRESETS[] = {5.0f, 10.0f, 50.0f};
+const float GEO_PRESETS[] = {5.0f, 10.0f, 20.0f};
 const int   GEO_COUNT     = 3;
 int         geoIndex      = 1;  // default: 10km
 
@@ -334,10 +334,10 @@ FlightStatus deriveStatus(int alt, int vs, float dist) {
 
 const char* statusLabel(FlightStatus s) {
   switch (s) {
-    case STATUS_TAKING_OFF:  return "TAKING OFF";
+    case STATUS_TAKING_OFF:  return "TAKEOFF";
     case STATUS_CLIMBING:    return "CLIMBING";
     case STATUS_CRUISING:    return "CRUISING";
-    case STATUS_DESCENDING:  return "DESCENDING";
+    case STATUS_DESCENDING:  return "DESCEND";
     case STATUS_APPROACH:    return "APPROACH";
     case STATUS_LANDING:     return "LANDING";
     case STATUS_OVERHEAD:    return "OVERHEAD";
@@ -783,7 +783,7 @@ void drawNavBar() {
   tft.print("WX");
 
   // GEO button
-  const char* geoLabels[] = {"5km", "10km", "50km"};
+  const char* geoLabels[] = {"5km", "10km", "20km"};
   tft.fillRect(GEO_BTN_X1, NAV_Y + 2, NAV_BTN_W, NAV_BTN_H, C_DIMMER);
   tft.setTextColor(C_AMBER, C_DIMMER);
   tft.setTextSize(2);
@@ -867,7 +867,7 @@ void handleTouch(uint16_t tx, uint16_t ty) {
       tft.setTextColor(C_BG, C_AMBER);
       tft.setTextSize(2);
       tft.setCursor(GEO_BTN_X1 + 8, NAV_Y + 10);
-      tft.print(geoIndex == 0 ? "5km" : geoIndex == 1 ? "10km" : "50km");
+      tft.print(geoIndex == 0 ? "5km" : geoIndex == 1 ? "10km" : "20km");
       delay(100);
       geoIndex = (geoIndex + 1) % GEO_COUNT;
       GEOFENCE_KM = GEO_PRESETS[geoIndex];
