@@ -1,0 +1,28 @@
+{
+    "configurations": [
+        {
+            "name": "ESP32",
+            "includePath": [
+                "${workspaceFolder}/tracker_live_fnk0103s/libraries/**",
+                "${env:LOCALAPPDATA}/Arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32",
+                "${env:LOCALAPPDATA}/Arduino15/packages/esp32/hardware/esp32/3.3.7/variants/esp32",
+                "${env:LOCALAPPDATA}/Arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/**",
+                "${env:LOCALAPPDATA}/Arduino15/packages/esp32/tools/esp32-libs/3.3.7/include/**",
+                "${env:LOCALAPPDATA}/Arduino15/packages/esp32/tools/esp32-libs/3.3.7/qio_qspi/include",
+                "${env:LOCALAPPDATA}/Arduino15/packages/esp32/tools/esp-x32/2511/picolibc/include",
+                "${env:LOCALAPPDATA}/Arduino15/packages/esp32/tools/esp-x32/2511/lib/gcc/xtensa-esp-elf/14.2.0/include"
+            ],
+            "defines": [
+                "ARDUINO=10819",
+                "ESP32",
+                "F_CPU=240000000L",
+                "_DEFAULT_SOURCE"
+            ],
+            "compilerPath": "${env:LOCALAPPDATA}/Arduino15/packages/esp32/tools/esp-x32/2511/bin/xtensa-esp32-elf-gcc.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}
