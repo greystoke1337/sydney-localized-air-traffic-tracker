@@ -107,7 +107,7 @@ struct WeatherData {
   int     wind_dir;
   char    wind_cardinal[4];
   float   uv_index;
-  int16_t utc_offset_secs;
+  int32_t utc_offset_secs;
 };
 WeatherData wxData;
 bool        wxReady         = false;
@@ -989,6 +989,7 @@ void renderFlight(const Flight& f) {
 
 // ─── Fetch weather from Pi proxy (Open-Meteo) ─────────
 void fetchWeather() {
+  esp_task_wdt_reset();
   char url[160];
   snprintf(url, sizeof(url),
     "http://%s:%d/weather?lat=%.4f&lon=%.4f",
