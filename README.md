@@ -83,7 +83,7 @@ const char* PROXY_HOST = "192.168.x.x";  // IP of your local proxy
 
 ### Resilience
 
-The firmware uses a 3-tier fallback cascade: Pi proxy → direct airplanes.live API (HTTPS) → SD card cache. Proxy calls use a 3-second TCP connect timeout so the device boots cleanly even when the Pi is powered off — no watchdog crash loop.
+The firmware uses a 3-tier fallback cascade: Pi proxy → direct airplanes.live API (HTTPS) → SD card cache. Proxy calls use a 3-second TCP connect timeout so the device boots cleanly even when the Pi is powered off — no watchdog crash loop. The 16 KB JSON document is allocated once at startup and reused every cycle to prevent heap fragmentation on long-running sessions.
 
 ### Mock proxy tool
 

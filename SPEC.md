@@ -69,7 +69,7 @@ FlightRadar24 and similar apps show the whole world — you have to go find your
 | **Touch** | Nav bar with three touch buttons: WX (weather screen), GEO (cycles geofence: 5 km / 10 km / 50 km), CFG (opens captive portal) |
 | **Weather** | Temperature, humidity, wind speed/direction, conditions — accessed via WX button; data from Open-Meteo via Pi proxy, refreshed every 15 minutes |
 | **Preview** | `tft-preview.html` — browser-based canvas simulator that mirrors firmware rendering; verify layout changes before flashing |
-| **Resilience** | 3 s TCP connect timeout on proxy; falls back proxy → direct API → SD card cache (`cache.json`). WDT-safe boot — no crash if Pi is offline. Timestamped diagnostic logging on serial. |
+| **Resilience** | 3 s TCP connect timeout on proxy; falls back proxy → direct API → SD card cache (`cache.json`). WDT-safe boot — no crash if Pi is offline. Global JSON document (16 KB, allocated once) prevents heap fragmentation. Periodic heap monitoring on serial. Timestamped diagnostic logging. |
 
 ---
 
