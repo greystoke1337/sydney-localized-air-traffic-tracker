@@ -151,6 +151,9 @@ struct Flight {
 Flight flights[20];
 Flight newFlights[20];
 
+// Reused every parse cycle — avoids 16 KB heap alloc/free that fragments memory
+DynamicJsonDocument g_jsonDoc(16384);
+
 // global — keeps off the stack
 int           flightCount  = 0;
 int           flightIndex  = 0;
@@ -1329,20 +1332,17 @@ int parsePayload(String& payload) {
   af["flight"] = af["r"] = af["t"] = af["lat"] = af["lon"] =
   af["alt_baro"] = af["gs"] = af["baro_rate"] = af["track"] =
   af["squawk"] = af["route"] = true;
-  Serial.printf("[MEM] Before JSON alloc: %d free\n", ESP.getFreeHeap());
-  DynamicJsonDocument doc(16384);
-  // In-situ parse: ArduinoJSON modifies the buffer in-place and stores string
-  // pointers into it rather than copying — doc memory usage is ~half of copy mode.
-  DeserializationError err = deserializeJson(doc, &payload[0], payload.length(), DeserializationOption::Filter(filter));
+  g_jsonDoc.clear();
+  Serial.printf("[MEM] Before JSON parse: %d free\n", ESP.getFreeHeap());
+  DeserializationError err = deserializeJson(g_jsonDoc, &payload[0], payload.length(), DeserializationOption::Filter(filter));
   Serial.printf("[MEM] After JSON parse: %d free\n", ESP.getFreeHeap());
   if (err) {
     Serial.printf("JSON parse error: %s\n", err.c_str());
     return -1;
   }
-  int result = extractFlights(doc);
-  // Free doc before returning, then free the source buffer in caller
-  doc.clear();
-  payload = String();  // release the source buffer now that doc is done with it
+  int result = extractFlights(g_jsonDoc);
+  g_jsonDoc.clear();
+  payload = String();
   return result;
 }
 
@@ -1712,6 +1712,7 @@ void fetchFlights() {
     currentScreen = SCREEN_FLIGHT;
     renderFlight(flights[0]);
   }
+  logTs("HEAP", "Free:%d MaxBlock:%d", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 }
 
 // ─── OTA progress overlay ─────────────────────────────
@@ -2055,13 +2056,24 @@ void loop() {
     }
   }
 
+  // Periodic heap/fragmentation monitoring (every 60 s)
+  static unsigned long lastHeapLog = 0;
+  if (now - lastHeapLog >= 60000) {
+    lastHeapLog = now;
+    logTs("HEAP", "Free:%d MaxBlock:%d", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  }
+
   if (now - lastTick >= 1000) {
     lastTick = now;
     countdown--;
     wxCountdown--;
 
     if (WiFi.status() != WL_CONNECTED) {
-      WiFi.reconnect();
+      static unsigned long lastReconnect = 0;
+      if (now - lastReconnect > 10000) {
+        lastReconnect = now;
+        WiFi.reconnect();
+      }
     }
 
     if (currentScreen == SCREEN_FLIGHT && flightCount > 0) drawStatusBar();
