@@ -172,6 +172,17 @@ unsigned long directApiNextRetryMs = 0;
 
 bool wifiOk() { return WiFi.status() == WL_CONNECTED; }
 
+void logTs(const char* tag, const char* fmt, ...) {
+  char buf[160];
+  unsigned long ms = millis();
+  int n = snprintf(buf, sizeof(buf), "[%lu.%03lu][%s] ", ms / 1000, ms % 1000, tag);
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(buf + n, sizeof(buf) - n, fmt, args);
+  va_end(args);
+  Serial.println(buf);
+}
+
 // ─── Session log (track unique callsigns to avoid duplicates) ─
 #define MAX_LOGGED 200
 char loggedCallsigns[MAX_LOGGED][12];
@@ -1130,9 +1141,14 @@ void fetchWeather() {
   snprintf(url, sizeof(url),
     "http://%s:%d/weather?lat=%.4f&lon=%.4f",
     PROXY_HOST, PROXY_PORT, HOME_LAT, HOME_LON);
+  WiFiClient tcp;
+  if (!tcp.connect(PROXY_HOST, PROXY_PORT, 3000)) {
+    Serial.println("[WX] Connect failed");
+    return;
+  }
   HTTPClient http;
-  http.begin(url);
-  http.setTimeout(8000);
+  http.begin(tcp, url);
+  http.setTimeout(5000);
   int code = http.GET();
   if (code != 200) {
     Serial.printf("[WX] Fetch failed (%d)\n", code);
@@ -1407,22 +1423,28 @@ int parsePayload(String& payload) {
 // ─── Fetch: proxy (returns small String) ──────────────
 String fetchFromProxy() {
   if (!wifiOk()) { Serial.println("[PROXY] WiFi not connected"); return ""; }
+  unsigned long t0 = millis();
+  WiFiClient tcp;
+  if (!tcp.connect(PROXY_HOST, PROXY_PORT, 3000)) {
+    Serial.printf("[PROXY] Connect failed (%lu ms)\n", millis() - t0);
+    return "";
+  }
   char url[160];
   snprintf(url, sizeof(url),
     "http://%s:%d/flights?lat=%.4f&lon=%.4f&radius=%d",
     PROXY_HOST, PROXY_PORT, HOME_LAT, HOME_LON, apiRadiusNm());
   HTTPClient http;
-  http.begin(url);
+  http.begin(tcp, url);
   http.setTimeout(5000);
   int code = http.GET();
   if (code == 200) {
     String p = http.getString();
     http.end();
-    Serial.printf("Proxy OK, payload=%d bytes\n", p.length());
+    Serial.printf("[PROXY] OK %d bytes (%lu ms)\n", p.length(), millis() - t0);
     return p;
   }
   http.end();
-  Serial.printf("Proxy failed (%d)\n", code);
+  Serial.printf("[PROXY] HTTP %d (%lu ms)\n", code, millis() - t0);
   return "";
 }
 
@@ -1462,14 +1484,15 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 )EOF";
 
 // ─── Fetch: direct API — zero-allocation stream scanner ──
-static bool readQuotedString(WiFiClient* s, char* buf, int maxLen) {
+static bool readQuotedString(WiFiClient* s, char* buf, int maxLen, unsigned long deadline) {
   int i = 0;
   int c;
-  while ((c = s->read()) != -1) {
+  while (millis() < deadline && (c = s->read()) != -1) {
     if (c == '"') { buf[i] = 0; return true; }
-    if (c == '\\') s->read();  
+    if (c == '\\') { if (millis() >= deadline) break; s->read(); }
     if (i < maxLen - 1) buf[i++] = (char)c;
   }
+  buf[i] = 0;
   return false;
 }
 
@@ -1529,6 +1552,7 @@ int fetchAndParseDirectAPI() {
   Serial.printf("[MEM] Direct stream scan start: %d free\n", ESP.getFreeHeap());
 
   WiFiClient* s = http.getStreamPtr();
+  if (!s) { Serial.println("[DIRECT] Null stream"); http.end(); return -1; }
   int newCount = 0;
   int depth = 0;          
   bool inString = false;
@@ -1583,21 +1607,23 @@ int fetchAndParseDirectAPI() {
   };
 
   unsigned long deadline = millis() + DIRECT_API_TIMEOUT;
+  unsigned long lastWdt = millis();
   int c;
   while (millis() < deadline) {
+    if (millis() - lastWdt > 5000) { esp_task_wdt_reset(); lastWdt = millis(); }
     if (!wifiOk()) { Serial.println("[DIRECT] WiFi lost during stream"); break; }
     if (!s->available()) { delay(5); continue; }
     c = s->read();
     if (c == -1) break;
     if (c == '"' && depth == 2) {
-      readQuotedString(s, key, sizeof(key));
+      readQuotedString(s, key, sizeof(key), deadline);
       while (s->available() && s->peek() != ':' && s->peek() != '"') s->read();
       if (s->peek() == ':') s->read();
       while (s->available() && (s->peek()==' '||s->peek()=='\t')) s->read();
       int nxt = s->peek();
       if (nxt == '"') {
-        s->read();  
-        readQuotedString(s, val, sizeof(val));
+        s->read();
+        readQuotedString(s, val, sizeof(val), deadline);
         applyKV();
       } else if (nxt == '-' || (nxt >= '0' && nxt <= '9')) {
         readNumber(s, val, sizeof(val));
@@ -1679,7 +1705,7 @@ int extractFlights(DynamicJsonDocument& doc) {
 
 // ─── Main fetch ───────────────────────────────────────
 void fetchFlights() {
-  Serial.printf("[MEM] fetchFlights start: %d bytes free\n", ESP.getFreeHeap());
+  logTs("FETCH", "Start (heap %d)", ESP.getFreeHeap());
   isFetching = true;
   if (flightCount > 0) {
     drawHeader();
@@ -1700,17 +1726,17 @@ void fetchFlights() {
       payload = String();
       dataSource = 0;
     } else {
-      Serial.println("Trying direct API (stream)...");
+      logTs("FETCH", "Proxy empty, trying direct API...");
       esp_task_wdt_reset();
       newCount = fetchAndParseDirectAPI();
       if (newCount >= 0) dataSource = 1;
     }
   } else {
-    Serial.println("[FETCH] WiFi not connected, skipping network fetches");
+    logTs("FETCH", "WiFi not connected, skipping network");
   }
 
   if (newCount < 0) {
-    Serial.println("Network failed, loading SD cache...");
+    logTs("FETCH", "Network failed, trying SD cache...");
     String payload = readCache();
     if (!payload.isEmpty()) {
       newCount = parsePayload(payload);
@@ -2010,6 +2036,7 @@ void setup() {
           }
         }
       }
+      esp_task_wdt_reset();
       delay(50);
     }
   }
@@ -2074,12 +2101,14 @@ void setup() {
             }
           }
         }
+        esp_task_wdt_reset();
         delay(50);
       }
     }
   }
 
   fetchFlights();
+  esp_task_wdt_reset();
   countdown = REFRESH_SECS;
   fetchWeather();
   wxCountdown = WX_REFRESH_SECS;

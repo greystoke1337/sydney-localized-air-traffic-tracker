@@ -293,9 +293,25 @@ pm2 status  # verify both are online after reboot
 | Stats all zero after restart | Normal — peak.json restores hourly data but session counts reset |
 | Website shows fetch error | `pm2 status` — is proxy online? |
 | api.overheadtracker.com unreachable | `pm2 logs tunnel` — is tunnel connected? |
-| ESP32 shows HTTP ERR | Is Pi powered on? ping 192.168.86.24 |
+| ESP32 shows HTTP ERR | Is Pi powered on? ping 192.168.86.24. ESP32 will fall back to direct API automatically after 3 s. |
 | 429 errors from airplanes.live | Cache may have been disabled — check server.js |
 | Tunnel restart count very high | `pm2 logs tunnel --lines 20` — check for auth or memory errors |
+
+---
+
+## Testing Without the Pi
+
+Use the mock proxy tool to simulate failure modes:
+
+```bash
+node tools/mock-proxy.js timeout    # hangs — tests ESP32 connect timeout
+node tools/mock-proxy.js error503   # returns 503 — tests fallback to direct API
+node tools/mock-proxy.js normal     # valid responses — tests happy path
+```
+
+Set `PROXY_HOST` in the firmware to your dev machine's IP, flash, and monitor serial output.
+
+The Pi proxy also has a built-in toggle: `curl -X POST http://192.168.86.24:3000/proxy/toggle` makes it return 503 until toggled back — useful for testing fallback without reflashing.
 
 ---
 

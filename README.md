@@ -81,6 +81,28 @@ const char* PROXY_HOST = "192.168.x.x";  // IP of your local proxy
 
 **Over-the-air updates:** after the first USB flash, the device advertises itself as `overhead-tracker.local` on the local network via mDNS. Run `./build.sh ota` (or press **Ctrl+Shift+B** in VS Code) to compile and upload wirelessly. The TFT displays a green progress bar during the update.
 
+### Resilience
+
+The firmware uses a 3-tier fallback cascade: Pi proxy → direct airplanes.live API (HTTPS) → SD card cache. Proxy calls use a 3-second TCP connect timeout so the device boots cleanly even when the Pi is powered off — no watchdog crash loop.
+
+### Mock proxy tool
+
+`tools/mock-proxy.js` is a zero-dependency Node.js server for testing firmware resilience without the real Pi proxy.
+
+```bash
+node tools/mock-proxy.js [mode] [port]
+```
+
+| Mode | Behavior |
+|------|----------|
+| `normal` | Valid flight + weather JSON (default) |
+| `timeout` | Accepts TCP, never responds |
+| `error503` | Returns 503 Service Unavailable |
+| `error502` | Returns 502 Bad Gateway |
+| `corrupt` | Returns 200 with broken JSON |
+| `partial` | Returns 200, drops connection mid-body |
+| `slow` | Waits 4 seconds before valid response |
+
 ### TFT preview tool
 
 `tft-preview.html` is a browser-based simulator of the ESP32 display. Open it to preview layout changes before flashing.
