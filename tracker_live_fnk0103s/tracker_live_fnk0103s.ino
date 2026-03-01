@@ -392,17 +392,16 @@ void logFlight(const Flight& f) {
   if (!file) return;
 
   if (isNew) {
-    file.println("callsign,reg,type,airline,dep,arr,status,dist_km");
+    file.println("callsign,reg,type,airline,route,status,dist_km");
   }
 
-  char row[96];
-  snprintf(row, sizeof(row), "%s,%s,%s,%s,%s,%s,%s,%.1f",
+  char row[128];
+  snprintf(row, sizeof(row), "%s,%s,%s,%s,%s,%s,%.1f",
     f.callsign,
     f.reg,
     f.type,
     getAirline(f.callsign),
-    f.dep[0] ? f.dep : "",
-    f.arr[0] ? f.arr : "",
+    f.route[0] ? f.route : "",
     statusLabel(f.status),
     f.dist
   );
