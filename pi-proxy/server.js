@@ -13,6 +13,109 @@ const ROUTE_CACHE_FILE = __dirname + '/route-cache.json';
 const cache      = new Map();
 const routeCache = new Map();  // callsign -> { dep, arr, timestamp }
 
+// ICAO and IATA codes → city name (same DB as web app)
+const AIRPORT_DB = {
+  // Australia
+  YSSY:'Sydney',YSAY:'Sydney',YMLB:'Melbourne',YMML:'Melbourne',YBBN:'Brisbane',
+  YPPH:'Perth',YPAD:'Adelaide',YSCB:'Canberra',YBCS:'Cairns',YBHM:'Hamilton Is',
+  YBTL:'Townsville',YBAS:'Alice Springs',YBDG:'Bendigo',YDBY:'Derby',
+  YSNF:'Norfolk Is',YAGD:'Aganda',
+  SYD:'Sydney',MEL:'Melbourne',BNE:'Brisbane',PER:'Perth',ADL:'Adelaide',
+  CBR:'Canberra',CNS:'Cairns',OOL:'Gold Coast',TSV:'Townsville',DRW:'Darwin',
+  HBA:'Hobart',LST:'Launceston',MKY:'Mackay',ROK:'Rockhampton',
+  // Asia Pacific
+  NZAA:'Auckland',NZCH:'Christchurch',NZWN:'Wellington',NZQN:'Queenstown',
+  AKL:'Auckland',CHC:'Christchurch',WLG:'Wellington',ZQN:'Queenstown',
+  WSSS:'Singapore',WSAP:'Singapore',SIN:'Singapore',
+  VHHH:'Hong Kong',HKG:'Hong Kong',
+  RJAA:'Tokyo',RJTT:'Tokyo',NRT:'Tokyo',HND:'Tokyo',
+  RJBB:'Osaka',RJOO:'Osaka',KIX:'Osaka',ITM:'Osaka',
+  RKSI:'Seoul',RKSS:'Seoul',ICN:'Seoul',GMP:'Seoul',
+  RCTP:'Taipei',RCSS:'Taipei',TPE:'Taipei',TSA:'Taipei',
+  VTBS:'Bangkok',VTBD:'Bangkok',BKK:'Bangkok',DMK:'Bangkok',
+  WMKK:'Kuala Lumpur',KUL:'Kuala Lumpur',
+  WADD:'Bali',WIII:'Jakarta',DPS:'Bali',CGK:'Jakarta',
+  RPLL:'Manila',MNL:'Manila',
+  VVTS:'Ho Chi Minh',VVNB:'Hanoi',SGN:'Ho Chi Minh',HAN:'Hanoi',
+  ZBAA:'Beijing',ZGSZ:'Shenzhen',ZGGG:'Guangzhou',ZSPD:'Shanghai',
+  ZSSS:'Shanghai',PEK:'Beijing',SZX:'Shenzhen',CAN:'Guangzhou',PVG:'Shanghai',SHA:'Shanghai',
+  ZUCK:'Chongqing',ZUUU:'Chengdu',CKG:'Chongqing',CTU:'Chengdu',
+  OMDB:'Dubai',OMDW:'Dubai',DXB:'Dubai',DWC:'Dubai',
+  OMAA:'Abu Dhabi',AUH:'Abu Dhabi',
+  OTBD:'Doha',OTHH:'Doha',DOH:'Doha',
+  OERK:'Riyadh',OEDF:'Dammam',RUH:'Riyadh',DMM:'Dammam',
+  OJAM:'Amman',LLBG:'Tel Aviv',AMM:'Amman',TLV:'Tel Aviv',
+  VIDP:'Delhi',VABB:'Mumbai',VOCB:'Chennai',VOBL:'Bangalore',
+  DEL:'Delhi',BOM:'Mumbai',MAA:'Chennai',BLR:'Bangalore',
+  VOMM:'Chennai',VECC:'Kolkata',CCU:'Kolkata',
+  // Europe
+  EGLL:'London',EGKK:'London',EGSS:'London',EGLC:'London',
+  LHR:'London',LGW:'London',STN:'London',LCY:'London',LTN:'London',
+  LFPG:'Paris',LFPO:'Paris',CDG:'Paris',ORY:'Paris',
+  EHAM:'Amsterdam',AMS:'Amsterdam',
+  EDDF:'Frankfurt',FRA:'Frankfurt',
+  EDDM:'Munich',MUC:'Munich',
+  LEMD:'Madrid',MAD:'Madrid',
+  LEBL:'Barcelona',BCN:'Barcelona',
+  LIRF:'Rome',LIMC:'Milan',FCO:'Rome',MXP:'Milan',LIN:'Milan',
+  EGPH:'Edinburgh',EGPF:'Glasgow',EDI:'Edinburgh',GLA:'Glasgow',
+  EIDW:'Dublin',DUB:'Dublin',
+  EBBR:'Brussels',BRU:'Brussels',
+  EKCH:'Copenhagen',CPH:'Copenhagen',
+  ESSA:'Stockholm',ARN:'Stockholm',
+  ENGM:'Oslo',OSL:'Oslo',
+  EFHK:'Helsinki',HEL:'Helsinki',
+  LSZH:'Zurich',ZRH:'Zurich',
+  LSGG:'Geneva',GVA:'Geneva',
+  LOWW:'Vienna',VIE:'Vienna',
+  EPWA:'Warsaw',WAW:'Warsaw',
+  LKPR:'Prague',PRG:'Prague',
+  LHBP:'Budapest',BUD:'Budapest',
+  LGAV:'Athens',ATH:'Athens',
+  LTFM:'Istanbul',LTBA:'Istanbul',IST:'Istanbul',SAW:'Istanbul',
+  // Americas
+  KJFK:'New York',KLGA:'New York',KEWR:'New York',
+  JFK:'New York',LGA:'New York',EWR:'New York',
+  KLAX:'Los Angeles',LAX:'Los Angeles',
+  KSFO:'San Francisco',SFO:'San Francisco',
+  KORD:'Chicago',KMDW:'Chicago',ORD:'Chicago',MDW:'Chicago',
+  KBOS:'Boston',BOS:'Boston',
+  KMIA:'Miami',MIA:'Miami',
+  KATL:'Atlanta',ATL:'Atlanta',
+  KDFW:'Dallas',DFW:'Dallas',DAL:'Dallas',
+  KDEN:'Denver',DEN:'Denver',
+  KSEA:'Seattle',SEA:'Seattle',
+  KLAS:'Las Vegas',LAS:'Las Vegas',
+  KPHX:'Phoenix',PHX:'Phoenix',
+  CYYZ:'Toronto',CYVR:'Vancouver',CYUL:'Montreal',
+  YYZ:'Toronto',YVR:'Vancouver',YUL:'Montreal',
+  SBGR:'São Paulo',SBGL:'Rio de Janeiro',
+  GRU:'São Paulo',GIG:'Rio de Janeiro',
+  SAEZ:'Buenos Aires',EZE:'Buenos Aires',
+  SKBO:'Bogotá',BOG:'Bogotá',
+  SEQM:'Quito',UIO:'Quito',
+  // Africa
+  FAOR:'Johannesburg',FACT:'Cape Town',
+  JNB:'Johannesburg',CPT:'Cape Town',
+  HECA:'Cairo',CAI:'Cairo',
+  DNMM:'Lagos',LOS:'Lagos',
+  HAAB:'Addis Ababa',ADD:'Addis Ababa',
+  HSSS:'Khartoum',KRT:'Khartoum',
+  FMMI:'Antananarivo',TNR:'Antananarivo',
+};
+
+function airportName(code) {
+  if (!code) return null;
+  return AIRPORT_DB[code.trim().toUpperCase()] || code.trim().toUpperCase();
+}
+
+function formatRouteString(dep, arr) {
+  if (!dep && !arr) return null;
+  const depName = dep ? airportName(dep) : '?';
+  const arrName = arr ? airportName(arr) : '?';
+  return depName + ' > ' + arrName;
+}
+
 try {
   const saved = JSON.parse(fs.readFileSync(ROUTE_CACHE_FILE, 'utf8'));
   for (const [cs, entry] of Object.entries(saved)) routeCache.set(cs, entry);
@@ -47,6 +150,7 @@ async function lookupRoute(callsign) {
   const hit = routeCache.get(cs);
   if (hit && (Date.now() - hit.timestamp) < ROUTE_CACHE_MS) return hit;
 
+  // Source 1: OpenSky Network
   try {
     const url = `https://opensky-network.org/api/routes?callsign=${encodeURIComponent(cs)}`;
     const r   = await fetch(url, { signal: AbortSignal.timeout(4000) });
@@ -57,6 +161,26 @@ async function lookupRoute(callsign) {
         routeCache.set(cs, entry);
         saveRouteCache();
         return entry;
+      }
+    }
+  } catch { /* timeout or network error */ }
+
+  // Source 2: adsbdb.com fallback
+  try {
+    const url = `https://api.adsbdb.com/v0/callsign/${encodeURIComponent(cs)}`;
+    const r   = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (r.ok) {
+      const d = await r.json();
+      const fr = d?.response?.flightroute;
+      if (fr) {
+        const dep = fr.origin?.icao_code || fr.origin?.iata_code || null;
+        const arr = fr.destination?.icao_code || fr.destination?.iata_code || null;
+        if (dep || arr) {
+          const entry = { dep, arr, timestamp: Date.now() };
+          routeCache.set(cs, entry);
+          saveRouteCache();
+          return entry;
+        }
       }
     }
   } catch { /* timeout or network error */ }
@@ -355,6 +479,13 @@ app.get('/flights', async (req, res) => {
         if (routes[i]?.dep) ac.dep = routes[i].dep;
         if (routes[i]?.arr) ac.arr = routes[i].arr;
       });
+    }
+    // Pre-format route strings for ESP32 (and any other client)
+    for (const ac of (data.ac || [])) {
+      const dep = ac.dep || ac.orig_iata || null;
+      const arr = ac.arr || ac.dest_iata || null;
+      const routeStr = formatRouteString(dep, arr);
+      if (routeStr) ac.route = routeStr;
     }
     cache.set(key, { data, timestamp: now });
     addLog({ type: 'MISS', client, key });

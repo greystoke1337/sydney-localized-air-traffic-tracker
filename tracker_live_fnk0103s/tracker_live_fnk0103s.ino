@@ -137,8 +137,7 @@ struct Flight {
   char         callsign[12];
   char         reg[12];
   char         type[8];
-  char         dep[6];
-  char         arr[6];
+  char         route[40];
   float        lat, lon;
   int          alt;
   int          speed;
@@ -255,77 +254,6 @@ const char* getAircraftTypeName(const char* code) {
   for (int i = 0; i < AIRCRAFT_TYPE_COUNT; i++)
     if (strcmp(AIRCRAFT_TYPES[i].code, code) == 0) return AIRCRAFT_TYPES[i].name;
   return code; 
-}
-
-// ─── Airport name lookup ──────────────────────────────
-struct Airport { const char* code; const char* city; };
-const Airport AIRPORTS[] = {
-  {"YSSY","Sydney"},   {"YMML","Melbourne"}, {"YBBN","Brisbane"},
-  {"YPPH","Perth"},    {"YPAD","Adelaide"},  {"YSCB","Canberra"},
-  {"YBCS","Cairns"},   {"YBHM","Hamilton Is"},{"YBTL","Townsville"},
-  {"YBAS","Alice Spg"},{"YSNF","Norfolk Is"},
-  {"SYD","Sydney"},    {"MEL","Melbourne"},  {"BNE","Brisbane"},
-  {"PER","Perth"},     {"ADL","Adelaide"},   {"CBR","Canberra"},
-  {"CNS","Cairns"},    {"OOL","Gold Coast"}, {"TSV","Townsville"},
-  {"DRW","Darwin"},    {"HBA","Hobart"},     {"LST","Launceston"},
-  {"MKY","Mackay"},    {"ROK","Rockhampton"},
-  {"NZAA","Auckland"}, {"NZCH","Christchurch"},{"NZWN","Wellington"},{"NZQN","Queenstown"},
-  {"AKL","Auckland"},  {"CHC","Christchurch"},{"WLG","Wellington"},  {"ZQN","Queenstown"},
-  {"WSSS","Singapore"},{"SIN","Singapore"},
-  {"VHHH","Hong Kong"},{"HKG","Hong Kong"},
-  {"RJAA","Tokyo"},    {"RJTT","Tokyo"},     {"NRT","Tokyo"},       {"HND","Tokyo"},
-  {"RJBB","Osaka"},    {"KIX","Osaka"},
-  {"RKSI","Seoul"},    {"ICN","Seoul"},
-  {"RCTP","Taipei"},   {"TPE","Taipei"},
-  {"VTBS","Bangkok"},  {"BKK","Bangkok"},
-  {"WMKK","K.Lumpur"}, {"KUL","K.Lumpur"},
-  {"WADD","Bali"},     {"WIII","Jakarta"},   {"DPS","Bali"},        {"CGK","Jakarta"},
-  {"RPLL","Manila"},   {"MNL","Manila"},
-  {"VVTS","Ho Chi Minh"},{"SGN","Ho Chi Minh"},{"VVNB","Hanoi"},   {"HAN","Hanoi"},
-  {"ZBAA","Beijing"},  {"ZSPD","Shanghai"},  {"PEK","Beijing"},     {"PVG","Shanghai"},
-  {"ZGGG","Guangzhou"},{"CAN","Guangzhou"},
-  {"OMDB","Dubai"},    {"DXB","Dubai"},
-  {"OMAA","Abu Dhabi"},{"AUH","Abu Dhabi"},
-  {"OTHH","Doha"},    {"DOH","Doha"},
-  {"VIDP","Delhi"},    {"VABB","Mumbai"},    {"DEL","Delhi"},       {"BOM","Mumbai"},
-  {"EGLL","London"},   {"EGKK","London"},   {"LHR","London"},      {"LGW","London"},
-  {"LFPG","Paris"},    {"CDG","Paris"},
-  {"EHAM","Amsterdam"},{"AMS","Amsterdam"},
-  {"EDDF","Frankfurt"},{"FRA","Frankfurt"},
-  {"EDDM","Munich"},   {"MUC","Munich"},
-  {"LEMD","Madrid"},   {"MAD","Madrid"},
-  {"LEBL","Barcelona"},{"BCN","Barcelona"},
-  {"LIRF","Rome"},     {"FCO","Rome"},
-  {"LTFM","Istanbul"}, {"IST","Istanbul"},
-  {"KJFK","New York"}, {"JFK","New York"},
-  {"KLAX","L.A."},     {"LAX","L.A."},
-  {"KSFO","S.F."},     {"SFO","S.F."},
-  {"KORD","Chicago"},  {"ORD","Chicago"},
-  {"KATL","Atlanta"},  {"ATL","Atlanta"},
-  {"KDFW","Dallas"},   {"DFW","Dallas"},
-  {"KDEN","Denver"},   {"DEN","Denver"},
-  {"KSEA","Seattle"},  {"SEA","Seattle"},
-  {"CYYZ","Toronto"},  {"YYZ","Toronto"},
-  {"CYVR","Vancouver"},{"YVR","Vancouver"},
-  {"FAOR","J'burg"},  {"JNB","J'burg"},
-  {"FACT","Cape Town"},{"CPT","Cape Town"},
-  {"HECA","Cairo"},    {"CAI","Cairo"},
-};
-const int AIRPORT_COUNT = sizeof(AIRPORTS) / sizeof(AIRPORTS[0]);
-
-const char* airportCity(const char* code) {
-  if (!code || !code[0]) return nullptr;
-  for (int i = 0; i < AIRPORT_COUNT; i++)
-    if (strcmp(AIRPORTS[i].code, code) == 0) return AIRPORTS[i].city;
-  return code;
-}
-
-bool formatRoute(const char* dep, const char* arr, char* buf, int len) {
-  if (!dep[0] && !arr[0]) return false;
-  const char* depName = dep[0] ? airportCity(dep) : "?";
-  const char* arrName = arr[0] ? airportCity(arr) : "?";
-  snprintf(buf, len, "%s > %s", depName, arrName);
-  return true;
 }
 
 // ─── Flight status derivation ─────────────────────────
@@ -1021,12 +949,11 @@ void renderFlight(const Flight& f) {
   tft.print("ROUTE");
   
   y += 10;
-  char routeBuf[64];
-  if (formatRoute(f.dep, f.arr, routeBuf, sizeof(routeBuf))) {
+  if (f.route[0]) {
     tft.setTextSize(2);
     tft.setTextColor(C_YELLOW, C_BG);
     tft.setCursor(x, y);
-    tft.print(routeBuf);
+    tft.print(f.route);
   } else {
     tft.setTextSize(2);
     tft.setTextColor(C_DIMMER, C_BG);
@@ -1402,7 +1329,7 @@ int parsePayload(String& payload) {
   JsonObject af = filter["ac"].createNestedObject();
   af["flight"] = af["r"] = af["t"] = af["lat"] = af["lon"] =
   af["alt_baro"] = af["gs"] = af["baro_rate"] = af["track"] =
-  af["squawk"] = af["dep"] = af["arr"] = af["orig_iata"] = af["dest_iata"] = true;
+  af["squawk"] = af["route"] = true;
   Serial.printf("[MEM] Before JSON alloc: %d free\n", ESP.getFreeHeap());
   DynamicJsonDocument doc(16384);
   // In-situ parse: ArduinoJSON modifies the buffer in-place and stores string
@@ -1562,6 +1489,7 @@ int fetchAndParseDirectAPI() {
   bool readingVal = false;
   char ac_callsign[12]={}, ac_reg[12]={}, ac_type[8]={};
   char ac_dep[6]={},       ac_arr[6]={},  ac_squawk[6]={};
+  char ac_route[40]={};
   float ac_lat=0, ac_lon=0;
   int   ac_alt=0, ac_speed=0, ac_vs=0, ac_track=-1;
 
@@ -1576,16 +1504,19 @@ int fetchAndParseDirectAPI() {
     strlcpy(f.reg,    ac_reg,    sizeof(f.reg));
     strlcpy(f.type,   ac_type,   sizeof(f.type));
     strlcpy(f.squawk, ac_squawk[0] ? ac_squawk : "----", sizeof(f.squawk));
-    strlcpy(f.dep,    ac_dep,    sizeof(f.dep));
-    strlcpy(f.arr,    ac_arr,    sizeof(f.arr));
+    // Direct API: format route from raw ICAO codes (no city name lookup)
+    if (ac_dep[0] || ac_arr[0]) {
+      snprintf(f.route, sizeof(f.route), "%s > %s",
+               ac_dep[0] ? ac_dep : "?", ac_arr[0] ? ac_arr : "?");
+    } else {
+      f.route[0] = 0;
+    }
     f.lat=ac_lat; f.lon=ac_lon; f.alt=ac_alt;
     f.speed=ac_speed; f.vs=ac_vs; f.track=ac_track; f.dist=dist;
     f.status = deriveStatus(ac_alt, ac_vs, dist);
     for (int i=0;f.callsign[i];i++) f.callsign[i]=toupper(f.callsign[i]);
     for (int i=0;f.reg[i];i++)      f.reg[i]=toupper(f.reg[i]);
     for (int i=0;f.type[i];i++)     f.type[i]=toupper(f.type[i]);
-    for (int i=0;f.dep[i];i++)      f.dep[i]=toupper(f.dep[i]);
-    for (int i=0;f.arr[i];i++)      f.arr[i]=toupper(f.arr[i]);
     newCount++;
   };
   auto applyKV = [&]() {
@@ -1637,7 +1568,7 @@ int fetchAndParseDirectAPI() {
       depth++;
       if (depth == 2) {
         ac_callsign[0]=ac_reg[0]=ac_type[0]=0;
-        ac_dep[0]=ac_arr[0]=ac_squawk[0]=0;
+        ac_dep[0]=ac_arr[0]=ac_squawk[0]=ac_route[0]=0;
         ac_lat=ac_lon=0; ac_alt=ac_speed=ac_vs=0; ac_track=-1;
       }
     } else if (c == '}') {
@@ -1677,8 +1608,7 @@ int extractFlights(DynamicJsonDocument& doc) {
     strlcpy(f.reg,    a["r"]      | "",     sizeof(f.reg));
     strlcpy(f.type,   a["t"]      | "",     sizeof(f.type));
     strlcpy(f.squawk, a["squawk"] | "----", sizeof(f.squawk));
-    { const char* d = a["dep"] | ""; strlcpy(f.dep, d[0] ? d : (a["orig_iata"] | ""), sizeof(f.dep)); }
-    { const char* a2 = a["arr"] | ""; strlcpy(f.arr, a2[0] ? a2 : (a["dest_iata"] | ""), sizeof(f.arr)); }
+    strlcpy(f.route,  a["route"]  | "",     sizeof(f.route));
     f.lat   = lat;
     f.lon = lon; f.alt = alt;
     f.speed = (int)(a["gs"]      | 0.0f);
@@ -1690,8 +1620,6 @@ int extractFlights(DynamicJsonDocument& doc) {
     for (int i = 0; f.callsign[i]; i++) f.callsign[i] = toupper(f.callsign[i]);
     for (int i = 0; f.reg[i]; i++)      f.reg[i]      = toupper(f.reg[i]);
     for (int i = 0; f.type[i]; i++)     f.type[i]     = toupper(f.type[i]);
-    for (int i = 0; f.dep[i]; i++)      f.dep[i]      = toupper(f.dep[i]);
-    for (int i = 0; f.arr[i]; i++)      f.arr[i]      = toupper(f.arr[i]);
     newCount++;
   }
 

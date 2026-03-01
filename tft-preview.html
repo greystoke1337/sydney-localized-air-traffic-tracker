@@ -489,7 +489,7 @@ function renderFlight(f, flightIndex, flightCount) {
   tft.print('ROUTE');
 
   y += 10;
-  const route = formatRoute(f.dep, f.arr);
+  const route = f.route || null;
   if (route) {
     tft.setTextSize(2);                    // FIXED: always size 2
     tft.setTextColor(C_YELLOW, C_BG);
@@ -623,8 +623,7 @@ function readControls() {
     type: document.getElementById('ctl-type').value,
     status: parseInt(document.getElementById('ctl-phase').value),
     squawk: document.getElementById('ctl-squawk').value,
-    dep: routeParts[0] || '',
-    arr: routeParts[1] || '',
+    route: formatRoute(routeParts[0] || '', routeParts[1] || '') || '',
     alt: alt,
     speed: speed,
     vs: vs,
